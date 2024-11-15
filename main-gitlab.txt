@@ -1,0 +1,16 @@
+stages:
+  - deploy
+
+deploy_to_server:
+  stage: deploy
+  image: ubuntu:20.04
+  before_script:
+    - apt-get update && apt-get install -y sshpass  # Install sshpass for remote connections
+  script:
+    - echo "Starting deployment..."
+    - chmod +x deploy.sh  # Ensure the deploy.sh script is executable
+    - echo "Running deploy.sh script on the remote server..."
+    - ./deploy.sh "$REMOTE_USER" "$REMOTE_HOST" "$REMOTE_PASSWORD"  # Pass runtime variables as arguments to the script
+  only:
+    - main  # Trigger this job only on the 'main' branch
+  when: manual  # This ensures the job is triggered manually
