@@ -1,0 +1,45 @@
+stages:
+  - setup
+  - deploy
+
+# Define the image to use for CI (Ubuntu, SUSE, or CentOS/RHEL based on the runner)
+image: ubuntu:20.04  # You can choose a different base image as per your needs
+
+# Install dependencies and run the installation script
+install_dependencies:
+  stage: setup
+  script:
+    - echo "Updating package lists..."
+    - sudo apt-get update -y
+    - echo "Installing curl..."
+    - sudo apt-get install -y curl gnupg
+
+# Make the shell script executable
+make_script_executable:
+  stage: setup
+  script:
+    - echo "Making the script executable..."
+    - chmod +x install_grafana_alloy.sh
+
+# Run the installation script
+run_installation_script:
+  stage: setup
+  script:
+    - echo "Running the installation script..."
+    - ./install_grafana_alloy.sh  # This will run the installation script
+
+# Post agent creation step (this step can be separated if desired)
+create_agent:
+  stage: deploy
+  script:
+    - echo "Sending POST request to create agent..."
+    - curl -X POST http://10.0.34.138:8000/api/v1/create-agent/ \
+      -H "Content-Type: application/json" \
+      -d '{
+          "host_name": "AAdmin-new",
+          "ip_port": "192.162.1.12:8080",
+          "keycloak_id": "a00e1a35-1550-4215-930a-1468298be901",
+          "agent_name": "Gitlab",
+          "status": "Active"
+      }'
+    - echo "Agent creation request sent successfully."
