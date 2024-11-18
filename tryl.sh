@@ -1,81 +1,73 @@
 #!/bin/bash
 
-# Update package lists
-echo "Updating package lists..."
-sudo apt-get update -y
+# This script automates the installation and configuration of Alloy with Grafana integration.
 
-# Install GPG if not present
-echo "Installing gnupg..."
-sudo apt-get install -y gnupg
+# Exit on any error
+set -e
 
-# Create the directory for APT keyrings
-echo "Creating APT keyring directory..."
-sudo mkdir -p /etc/apt/keyrings
-sudo chmod 0755 /etc/apt/keyrings
+# Step 1: Install GPG
+echo "Installing GPG..."
+sudo apt update && sudo apt install -y gpg
 
-# Add Grafana GPG key if it doesn't exist
-echo "Adding Grafana GPG key..."
-if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
-    sudo curl -fsSL https://apt.grafana.com/gpg.key -o /etc/apt/keyrings/grafana.gpg
-fi
+# Step 2: Import the GPG key and add the Grafana package repository
+echo "Importing GPG key and adding Grafana repository..."
+sudo mkdir -p /etc/apt/keyrings/
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
 
-# Add Grafana repository if not already added
-echo "Adding Grafana repository..."
-if [ ! -f "/etc/apt/sources.list.d/grafana.list" ]; then
-    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
-fi
+# Step 3: Update repositories
+echo "Updating repositories..."
+sudo apt-get update
 
-# Install Alloy if not already installed
+# Step 4: Install Alloy
 echo "Installing Alloy..."
-if ! dpkg -l | grep -q alloy; then
-    sudo apt-get install alloy -y
-fi
+sudo apt-get install -y alloy
 
-# Create /etc/alloy directory if not exists
-echo "Creating Alloy directory..."
-sudo mkdir -p /etc/alloy
-sudo chmod 0755 /etc/alloy
+# Step 5: Start and enable the Alloy service
+echo "Starting and enabling Alloy service..."
+sudo systemctl start alloy.service
+sudo systemctl enable alloy.service
 
-# Backup config.alloy if it exists
-echo "Backing up config.alloy..."
-if [ -f "/etc/alloy/config.alloy" ]; then
-    sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
-fi
+# Step 6: Verify the Alloy service status
+echo "Verifying the Alloy service status..."
+sudo systemctl status alloy.service
 
-# Install acl if not installed
-echo "Installing acl..."
-sudo apt-get install -y acl
+# Alloy Configuration
+echo "Configuring Alloy..."
 
-# Set ACL for alloy user on /var/log
-echo "Setting ACL for alloy user on /var/log..."
-sudo usermod -d -m alloy
-sudo setfacl -m u:alloy:r /var/log
-sudo setfacl -d -m u:alloy:r /var/log
+# Step 7: Set ACL to allow Alloy user access to /var/log
+echo "Setting ACL for Alloy user on /var/log..."
+sudo setfacl -dR -m u:alloy:r /var/log/
 
-# Copy the Alloy config file
-echo "Copying the Alloy config file..."
-sudo cp /home/ubuntu/config.alloy /etc/alloy/config.alloy
+# Step 8: Backup the default configuration file
+echo "Backing up the default configuration file..."
+sudo mv /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
 
-# Enable and restart Alloy service
-echo "Enabling and restarting Alloy service..."
-sudo systemctl enable alloy
-sudo systemctl restart alloy
+# Step 9: Create a new configuration file and add content
+echo "Creating and editing the new Alloy configuration file..."
+cat <<EOF | sudo tee /etc/alloy/config.alloy > /dev/null
+# Grafana Alloy Configuration
 
-# Check Alloy service status
-echo "Checking Alloy service status..."
-sudo systemctl status alloy
+# Prometheus Unix Exporter
+exporters:
+  - name: prometheus_unix_exporter
+    enabled: true
 
-# Send POST request to the provided URL with JSON data
-echo "Sending POST request to create new agent..."
+# Log files to monitor
+log_files:
+  - /var/log/syslog
+  - /var/log/auth.log
+  - /var/log/kern.log
 
-curl -X POST http://10.0.34.138:8000/api/v1/create-agent/ \
-    -H "Content-Type: application/json" \
-    -d '{
-        "host_name": "AAdmin-new",
-        "ip_port": "192.162.1.12:8080",
-        "keycloak_id": "a00e1a35-1550-4215-930a-1468298be901",
-        "agent_name": "Gitlab",
-        "status": "Active"
-    }'
+# Prometheus and Loki endpoints
+prometheus_endpoint: "http://localhost:9090"
+loki_endpoint: "http://localhost:3100"
+EOF
 
-echo "POST request sent successfully."
+# Step 10: Restart Alloy service and verify status
+echo "Restarting Alloy service..."
+sudo systemctl restart alloy.service
+echo "Verifying Alloy service status..."
+sudo systemctl status alloy.service
+
+echo "Script completed successfully."
