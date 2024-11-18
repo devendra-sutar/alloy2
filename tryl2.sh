@@ -17,6 +17,7 @@ sudo chmod 0755 /etc/apt/keyrings
 echo "Adding Grafana GPG key..."
 if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
     sudo curl -fsSL https://apt.grafana.com/gpg.key -o /etc/apt/keyrings/grafana.gpg
+    sudo apt-key add /etc/apt/keyrings/grafana.gpg
 fi
 
 # Add Grafana repository if not already added
@@ -28,7 +29,8 @@ fi
 # Install Alloy if not already installed
 echo "Installing Alloy..."
 if ! dpkg -l | grep -q alloy; then
-    sudo apt-get install alloy -y
+    echo "Alloy package not found in repositories. Please install it manually or provide a .deb file."
+    exit 1
 fi
 
 # Create /etc/alloy directory if not exists
@@ -48,7 +50,7 @@ sudo apt-get install -y acl
 
 # Set ACL for alloy user on /var/log
 echo "Setting ACL for alloy user on /var/log..."
-sudo usermod -d -m alloy
+sudo usermod -d /home/alloy -m alloy
 sudo setfacl -m u:alloy:r /var/log
 sudo setfacl -d -m u:alloy:r /var/log
 
@@ -56,10 +58,14 @@ sudo setfacl -d -m u:alloy:r /var/log
 echo "Copying the Alloy config file..."
 sudo cp /home/ubuntu/config.alloy /etc/alloy/config.alloy
 
-# Enable and restart Alloy service
+# Enable and restart Alloy service (if alloy service exists)
 echo "Enabling and restarting Alloy service..."
-sudo systemctl enable alloy
-sudo systemctl restart alloy
+if systemctl list-units --full --all | grep -q "alloy.service"; then
+    sudo systemctl enable alloy
+    sudo systemctl restart alloy
+else
+    echo "Alloy service not found. Please check the installation."
+fi
 
 # Check Alloy service status
 echo "Checking Alloy service status..."
@@ -84,3 +90,4 @@ if [ "$response" -eq 200 ]; then
 else
     echo "Failed to create agent. HTTP Status Code: $response"
 fi
+
