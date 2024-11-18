@@ -16,17 +16,16 @@ sudo chmod 0755 /etc/apt/keyrings
 # Add Grafana GPG key if it doesn't exist
 echo "Adding Grafana GPG key..."
 if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
-    sudo curl -fsSL https://apt.grafana.com/gpg.key -o /etc/apt/keyrings/grafana.gpg
-    sudo apt-key add /etc/apt/keyrings/grafana.gpg
+    curl -fsSL https://apt.grafana.com/gpg.key | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
 fi
 
 # Add Grafana repository if not already added
 echo "Adding Grafana repository..."
 if [ ! -f "/etc/apt/sources.list.d/grafana.list" ]; then
-    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list > /dev/null
 fi
 
-# Install Alloy if not already installed
+# Install Alloy (skip if not available in repos)
 echo "Installing Alloy..."
 if ! dpkg -l | grep -q alloy; then
     echo "Alloy package not found in repositories. Please install it manually or provide a .deb file."
@@ -58,14 +57,26 @@ sudo setfacl -d -m u:alloy:r /var/log
 echo "Copying the Alloy config file..."
 sudo cp /home/ubuntu/config.alloy /etc/alloy/config.alloy
 
-# Enable and restart Alloy service (if alloy service exists)
+# Create a basic systemd service file for Alloy (if necessary)
+echo "Creating Alloy service..."
+sudo tee /etc/systemd/system/alloy.service > /dev/null <<EOF
+[Unit]
+Description=Alloy Service
+After=network.target
+
+[Service]
+ExecStart=/path/to/alloy
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and restart Alloy service
 echo "Enabling and restarting Alloy service..."
-if systemctl list-units --full --all | grep -q "alloy.service"; then
-    sudo systemctl enable alloy
-    sudo systemctl restart alloy
-else
-    echo "Alloy service not found. Please check the installation."
-fi
+sudo systemctl daemon-reload
+sudo systemctl enable alloy
+sudo systemctl start alloy
 
 # Check Alloy service status
 echo "Checking Alloy service status..."
@@ -88,6 +99,4 @@ response=$(curl -s -w "%{http_code}" -o /dev/null -X POST http://10.0.34.138:800
 if [ "$response" -eq 200 ]; then
     echo "Agent created successfully."
 else
-    echo "Failed to create agent. HTTP Status Code: $response"
-fi
-
+    echo "
