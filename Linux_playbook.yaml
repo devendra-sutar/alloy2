@@ -1,0 +1,150 @@
+- name: Dynamically add hosts to inventory
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Add a Linux host to the inventory
+      add_host:
+        name: "{{ linux_host }}"
+        ansible_user: "{{ linux_user }}"
+        ansible_password: "{{ linux_password }}"
+        groups: linux
+      when: linux_host is defined and linux_user is defined
+
+    
+
+- name: Install Alloy on Linux
+  hosts: linux
+  become: yes
+  tasks:
+    - name: Install GPG
+      package:
+        name: gpg
+        state: present
+      when: ansible_os_family in ["Debian", "RedHat", "Suse"]
+
+    - name: Create directory for APT keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      when: ansible_os_family == "Debian"
+
+    - name: Check if Grafana GPG key already exists
+      stat:
+        path: "{{ 'etc/apt/keyrings/grafana.gpg' if ansible_os_family == 'Debian' else '/etc/pki/rpm-gpg/RPM-GPG-KEY-grafana' if ansible_os_family == 'RedHat' else '/etc/zypp/repos.d/RPM-GPG-KEY-grafana' }}"
+      register: grafana_gpg_key
+
+    - name: Download and add Grafana GPG key
+      shell: |
+        if [ "{{ ansible_os_family }}" == "Debian" ]; then
+          wget -q -O /etc/apt/keyrings/grafana.gpg https://apt.grafana.com/gpg.key  #| gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+        else
+          rpm --import https://packages.grafana.com/gpg.key
+        fi
+      args:
+        executable: /bin/bash
+        creates: "{{ '/etc/apt/keyrings/grafana.gpg' if ansible_os_family == 'Debian' else '/etc/pki/rpm-gpg/RPM-GPG-KEY-grafana' if ansible_os_family == 'RedHat' else '/etc/zypp/repos.d/RPM-GPG-KEY-grafana' }}"
+      # when: grafana_gpg_key.stat.exists == False
+      when: ansible_os_family in ["Debian", "RedHat", "Suse"] and grafana_gpg_key.stat.exists == False
+      
+    - name: Check if Grafana repository file already exists
+      stat:
+        path: "{{ '/etc/apt/sources.list.d/grafana.list' if ansible_os_family == 'Debian' else '/etc/yum.repos.d/grafana.repo' if ansible_os_family == 'RedHat' else '/etc/zypp/repos.d/grafana.repo' }}"
+      register: grafana_repo
+
+    - name: Add Grafana repository
+      block:
+        - name: Add Grafana APT repository
+          apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main"
+            state: present
+          when: ansible_os_family == "Debian"  and not grafana_repo.stat.exists
+
+        - name: Add Grafana YUM repository
+          yum_repository:
+            name: grafana
+            description: Grafana
+            baseurl: https://packages.grafana.com/oss/rpm
+            gpgcheck: yes
+            gpgkey: https://packages.grafana.com/gpg.key
+            enabled: yes
+          when: ansible_os_family == "RedHat"
+
+        - name: Add Grafana Zypper repository
+          command: >
+            zypper addrepo
+            --name 'Grafana'
+            --check
+            --gpgcheck
+            --refresh
+            'https://packages.grafana.com/oss/rpm'
+            grafana
+          when: ansible_os_family == "Suse"
+      when: not grafana_repo.stat.exists
+
+    - name: Update package list and install Alloy
+      block:
+        - name: Update APT package list
+          apt:
+            update_cache: yes
+          when: ansible_os_family == "Debian"
+
+        - name: Install Alloy on Debian
+          apt:
+            name: alloy
+            state: present
+          when: ansible_os_family == "Debian"
+
+        - name: Install Alloy on RedHat
+          yum:
+            name: alloy
+            state: present
+          when: ansible_os_family == "RedHat"
+          
+        - name: Install Alloy on Suse
+          zypper:
+            name: alloy
+            state: present
+          when: ansible_os_family == "Suse"
+
+    - name: Ensure Alloy configuration directory exists
+      file:
+        path: /etc/alloy
+        state: directory
+        mode: '0755'
+
+    - name: Copy Alloy configuration file
+      template:
+        src: ./config.alloy
+        dest: /etc/alloy/config.alloy
+      when: ansible_os_family == "Debian"
+
+    - name: Copy Alloy configuration file
+      template:
+        src: ./config1.alloy
+        dest: /etc/alloy/config.alloy
+      when: ansible_os_family == "RedHat"
+
+    - name: Copy Alloy configuration file
+      template:
+        src: ./config2.alloy
+        dest: /etc/alloy/config.alloy
+      when: ansible_os_family == "Suse"
+
+    - name: Reload systemd daemon
+      command: systemctl daemon-reload
+
+    - name: Enable and start Alloy service
+      systemd:
+        name: alloy
+        enabled: yes
+        state: restarted
+
+    - name: Check Alloy service status
+      systemd:
+        name: alloy
+        state: started
+        enabled: yes
+      register: alloy_status
+
+
