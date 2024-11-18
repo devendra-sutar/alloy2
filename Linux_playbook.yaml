@@ -20,28 +20,33 @@
         state: present
       when: ansible_os_family in ["Debian", "RedHat", "Suse"]
 
-    - name: Create directory for APT keyrings
+    - name: Create directory for APT keyrings (Debian only)
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
       when: ansible_os_family == "Debian"
 
-    - name: Check if Grafana GPG key already exists
+    - name: Check if Grafana GPG key already exists (Debian)
       stat:
-        path: "{{ '/etc/apt/keyrings/grafana.gpg' if ansible_os_family == 'Debian' else '/etc/pki/rpm-gpg/RPM-GPG-KEY-grafana' if ansible_os_family == 'RedHat' else '/etc/zypp/repos.d/RPM-GPG-KEY-grafana' }}"
+        path: /etc/apt/keyrings/grafana.gpg
       register: grafana_gpg_key
+      when: ansible_os_family == "Debian"
 
-    - name: Download and add Grafana GPG key
+    - name: Download and add Grafana GPG key (Debian)
       shell: |
-        if [ "{{ ansible_os_family }}" == "Debian" ]; then
-          wget -q -O /etc/apt/keyrings/grafana.gpg https://apt.grafana.com/gpg.key
-        else
-          rpm --import https://packages.grafana.com/gpg.key
-        fi
-      args:
-        executable: /bin/bash
-      when: grafana_gpg_key.stat.exists == False
+        wget -q -O /etc/apt/keyrings/grafana.gpg https://apt.grafana.com/gpg.key
+      when: ansible_os_family == "Debian" and not grafana_gpg_key.stat.exists
+
+    - name: Check if Grafana GPG key already exists (RedHat/Suse)
+      stat:
+        path: "{{ '/etc/pki/rpm-gpg/RPM-GPG-KEY-grafana' if ansible_os_family == 'RedHat' else '/etc/zypp/repos.d/RPM-GPG-KEY-grafana' }}"
+      register: grafana_gpg_key_rpm
+
+    - name: Download and add Grafana GPG key (RedHat/Suse)
+      shell: |
+        rpm --import https://packages.grafana.com/gpg.key
+      when: ansible_os_family in ['RedHat', 'Suse'] and not grafana_gpg_key_rpm.stat.exists
 
     - name: Check if Grafana repository file already exists
       stat:
@@ -50,13 +55,13 @@
 
     - name: Add Grafana repository
       block:
-        - name: Add Grafana APT repository
+        - name: Add Grafana APT repository (Debian)
           apt_repository:
             repo: "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main"
             state: present
           when: ansible_os_family == "Debian" and not grafana_repo.stat.exists
 
-        - name: Add Grafana YUM repository
+        - name: Add Grafana YUM repository (RedHat)
           yum_repository:
             name: grafana
             description: Grafana
@@ -66,7 +71,7 @@
             enabled: yes
           when: ansible_os_family == "RedHat" and not grafana_repo.stat.exists
 
-        - name: Add Grafana Zypper repository
+        - name: Add Grafana Zypper repository (Suse)
           command: >
             zypper addrepo
             --name 'Grafana'
@@ -79,7 +84,7 @@
 
     - name: Update package list and install Alloy
       block:
-        - name: Update APT package list
+        - name: Update APT package list (Debian)
           apt:
             update_cache: yes
           when: ansible_os_family == "Debian"
