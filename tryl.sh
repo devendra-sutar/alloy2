@@ -100,4 +100,5 @@ response=$(curl -s -w "%{http_code}" -o /dev/null -X POST http://10.0.34.138:800
 if [ "$response" -eq 200 ]; then
     echo "Agent created successfully."
 else
-    echo "Agent fail"
+    echo "Agent creation failed. Response code: $response"
+fi
