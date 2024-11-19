@@ -39,7 +39,6 @@ sudo apt-get update -y
 
 # Install GPG if not present
 echo "Installing gnupg..."
-#sudo apt-get install -y gnupg
 sudo apt install -y gpg 
 
 # Create the directory for APT keyrings
@@ -83,10 +82,7 @@ sudo apt-get install -y acl
 
 # Set ACL for alloy user on /var/log
 echo "Setting ACL for alloy user on /var/log..."
-#sudo usermod -d /home/alloy -m alloy
-#sudo setfacl -m u:alloy:r /var/log
-#sudo setfacl -d -m u:alloy:r /var/log
-sudo  setfacl -dR -m u:alloy:r /var/log/
+sudo setfacl -dR -m u:alloy:r /var/log/
 
 # Copy the Alloy config file
 echo "Copying the Alloy config file..."
@@ -117,48 +113,41 @@ sudo systemctl start alloy
 echo "Checking Alloy service status..."
 sudo systemctl status alloy
 
-# Generate a new unique ip_port
+# Variables for the agent data
+host_name="AAdmin-new1"
+keycloak_id="a00e1a35-1550-4215-930a-1468298be901"
+agent_name="Linux123"
+status="Active"
+
+# Generate unique IP/port if needed
 echo "Generating unique ip_port..."
 new_ip_port=$(generate_new_ip_port)
 
-# Send POST request to the provided URL with JSON data
-echo "Sending POST request to create new agent..."
+# Define the API URL
+url="http://10.0.34.138:8000/api/v1/create-agent/"
 
-# Capture the full response body and status code
-response=$(curl -s -w "%{http_code}" -o /dev/null -X POST http://10.0.34.138:8000/api/v1/create-agent/ \
+# Send POST request and capture the response code and body
+response=$(curl -s -w "%{http_code}" -o /tmp/curl_response.txt -X POST $url \
     -H "Content-Type: application/json" \
     -d '{
-        "host_name": "AAdmin-new1",
-        "ip_port": "'$new_ip_port'",
-        "keycloak_id": "a00e1a35-1550-4215-930a-1468298be901",
-        "agent_name": "Linux123",
-        "status": "Active"
+        "host_name": "'"$host_name"'",
+        "ip_port": "'"$new_ip_port"'",
+        "keycloak_id": "'"$keycloak_id"'",
+        "agent_name": "'"$agent_name"'",
+        "status": "'"$status"'"
     }')
 
-# Capture the full response body (for debugging)
-full_response=$(curl -s -X POST http://10.0.34.138:8000/api/v1/create-agent/ \
-    -H "Content-Type: application/json" \
-    -d '{
-        "host_name": "AAdmin-new1",
-        "ip_port": "'$new_ip_port'",
-        "keycloak_id": "a00e1a35-1550-4215-930a-1468298be901",
-        "agent_name": "Linux123",
-        "status": "Active"
-    }')
+# Capture full response body for debugging
+full_response=$(cat /tmp/curl_response.txt)
 
-# Log the response code and full response body for debugging
+# Output the response code and body for debugging
 echo "Response Code: $response"
 echo "Full Response Body: $full_response"
 
-# Check if the response is 201 (success, resource created)
-if [[ "$response" == "201" ]]; then
+# Check if the response is 200 or 201 (success)
+if [[ "$response" == "200" || "$response" == "201" ]]; then
     echo "Agent created successfully."
 else
-    # Handle the error response (for example, unique constraint failure)
-    if [[ "$full_response" == *"UNIQUE constraint failed"* ]]; then
-        echo "Agent creation failed due to unique constraint violation: $full_response"
-    else
-        echo "Agent creation failed. Response code: $response"
-        echo "Full response body: $full_response"
-    fi
+    echo "Agent creation failed. Response code: $response"
+    echo "Full response body: $full_response"
 fi
