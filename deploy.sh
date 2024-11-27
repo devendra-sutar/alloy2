@@ -4,7 +4,7 @@ set -e  # Exit immediately if a command exits with a non-zero status
 
 # Variables
 HOST_IP=$(hostname -I | awk '{print $1}')
-ALLOY_PORT=8080 
+ALLOY_PORT=8080
 ALLOY_CONFIG_URL="http://10.0.34.144/config.alloy"
 API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
 
@@ -47,7 +47,7 @@ fi
 log "Updating package lists with new repository..."
 sudo apt-get update -y
 
-# Now install Alloy
+# Install Alloy
 log "Installing Alloy..."
 install_package alloy || { log "Alloy package not found. Please check the repository setup."; exit 1; }
 
@@ -89,17 +89,13 @@ sudo systemctl status alloy
 # Check if agent already exists
 log "Checking if agent already exists..."
 check_response=$(curl -s -w "\n%{http_code}" -X GET "$API_ENDPOINT" \
-    -H "Content-Type: application/json" \
-    -G --data-urlencode "ip_port=$HOST_IP:$ALLOY_PORT")
+    -H "Content-Type: application/json")
 
 check_http_code=$(echo "$check_response" | tail -n1)
 check_body=$(echo "$check_response" | sed '$d')
 
-log "Check Response Code: $check_http_code"
-log "Check Response Body: $check_body"
-
 if [[ "$check_http_code" == "200" && "$check_body" == *"$HOST_IP:$ALLOY_PORT"* ]]; then
-    log "Agent already exists with the same IP:PORT combination. Skipping creation."
+    log "Agent with IP:PORT combination ($HOST_IP:$ALLOY_PORT) already exists. Skipping creation."
     exit 0
 fi
 
@@ -115,16 +111,16 @@ response=$(curl -s -w "\n%{http_code}" -X POST "$API_ENDPOINT" \
         "status": "Active"
     }')
 
-http_code=$(echo "$response" | tail -n1)  # Extract HTTP status code
-body=$(echo "$response" | sed '$d')      # Extract response body (JSON)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
 
 log "Response Code: $http_code"
 log "Response Body: $body"
 
 if [[ "$http_code" == "201" ]]; then
     log "Agent created successfully."
-elif [[ "$http_code" == "400" && "$body" == *"UNIQUE constraint failed"* ]]; then
-    log "ERROR: Agent already exists with the same IP:PORT combination."
+elif [[ "$body" == *"UNIQUE constraint failed"* ]]; then
+    log "ERROR: IP:PORT combination ($HOST_IP:$ALLOY_PORT) already exists."
 elif [[ "$http_code" == "409" ]]; then
     log "Conflict detected: $body"
 else
