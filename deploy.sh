@@ -29,7 +29,6 @@ sudo apt-get update -y
 
 install_package gpg
 install_package acl
-# install_package alloy || { log "Alloy package not found. Please install manually."; exit 1; }
 
 # Setup Grafana repository
 log "Setting up Grafana repository..."
@@ -86,6 +85,23 @@ sudo systemctl start alloy
 
 log "Alloy service status:"
 sudo systemctl status alloy
+
+# Check if agent already exists
+log "Checking if agent already exists..."
+check_response=$(curl -s -w "\n%{http_code}" -X GET "$API_ENDPOINT" \
+    -H "Content-Type: application/json" \
+    -G --data-urlencode "ip_port=$HOST_IP:$ALLOY_PORT")
+
+check_http_code=$(echo "$check_response" | tail -n1)
+check_body=$(echo "$check_response" | sed '$d')
+
+log "Check Response Code: $check_http_code"
+log "Check Response Body: $check_body"
+
+if [[ "$check_http_code" == "200" && "$check_body" == *"$HOST_IP:$ALLOY_PORT"* ]]; then
+    log "Agent already exists with the same IP:PORT combination. Skipping creation."
+    exit 0
+fi
 
 # Create new agent
 log "Creating new agent..."
