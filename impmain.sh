@@ -6,7 +6,7 @@ set -e  # Exit immediately if a command exits with a non-zero status
 HOST_IP=$(hostname -I | awk '{print $1}')
 ALLOY_PORT=8080 
 ALLOY_CONFIG_URL="http://10.0.34.144/config.alloy"
-API_ENDPOINT="http://10.0.34.138:8000/api/v1/create-agent/"
+API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
 
 # Function to log messages
 log() {
