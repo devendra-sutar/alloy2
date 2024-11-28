@@ -14,16 +14,53 @@ if grep -Ei 'ubuntu|debian' /etc/os-release > /dev/null; then
     PKG_MANAGER="apt-get"
     INSTALL_CMD="sudo apt-get install -y"
     UPDATE_CMD="sudo apt-get update -y"
+
+    # Grafana setup for Ubuntu/Debian
+    log "Setting up Grafana repository (Ubuntu/Debian)..."
+    sudo mkdir -p /etc/apt/keyrings
+    sudo chmod 0755 /etc/apt/keyrings
+
+    if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
+        curl -fsSL https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+    fi
+
+    if [ ! -f "/etc/apt/sources.list.d/grafana.list" ]; then
+        echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list > /dev/null
+    fi
+
+    log "Updating repositories..."
+    sudo apt-get update -y
+
 elif grep -Ei 'suse' /etc/os-release > /dev/null; then
     OS="suse"
     PKG_MANAGER="zypper"
     INSTALL_CMD="sudo zypper install -y"
     UPDATE_CMD="sudo zypper refresh"
+
+    # Grafana setup for SUSE
+    log "Setting up Grafana repository (SUSE)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    zypper addrepo https://rpm.grafana.com grafana
+
+    log "Updating repositories..."
+    sudo zypper update
+
 elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
     OS="redhat"
     PKG_MANAGER="yum"
     INSTALL_CMD="sudo yum install -y || sudo dnf install -y"
     UPDATE_CMD="sudo yum update -y || sudo dnf update -y"
+
+    # Grafana setup for RedHat/CentOS/Fedora
+    log "Setting up Grafana repository (RedHat/CentOS/Fedora)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    echo -e '[grafana]\nname=grafana\nbaseurl=https://rpm.grafana.com\nrepo_gpgcheck=1\nenabled=1\ngpgcheck=1\ngpgkey=https://rpm.grafana.com/gpg.key\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt' | sudo tee /etc/yum.repos.d/grafana.repo
+
+    log "Updating repositories..."
+    sudo yum update -y || sudo dnf update -y
+
 else
     log "Unsupported operating system."
     exit 1
@@ -32,7 +69,7 @@ fi
 log "Operating system detected: $OS"
 
 # Variables
-GITHUB_REPO="https://api.github.com/repos/example/alloy/releases/latest"
+GITHUB_REPO="https://api.github.com/repos/alloyproject/alloy/releases/latest"
 ALLOY_INSTALL_DIR="/usr/local/bin"
 ALLOY_CONFIG_URL="http://10.0.34.144/config.alloy"
 API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
@@ -99,13 +136,30 @@ log "Setting up Alloy..."
 sudo mkdir -p /etc/alloy
 sudo chmod 0755 /etc/alloy
 
-[ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
-
-log "Setting ACL for alloy user on /var/log..."
-sudo setfacl -dR -m u:alloy:r /var/log/
-
-log "Downloading the Alloy config file..."
-sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+# Make the config setup OS specific
+case $OS in
+    debian)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo apt-get install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    suse)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo zypper install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    redhat)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo yum install -y acl || sudo dnf install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+esac
 
 # Setup Alloy service
 log "Setting up Alloy service..."
