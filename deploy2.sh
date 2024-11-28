@@ -1,125 +1,210 @@
 #!/bin/bash
 
-# Prompt for input if variables are not passed as arguments
-if [ -z "$1" ]; then
-    read -p "Enter the remote server username: " linux_user
-else
-    linux_user=$1
-fi
+set -e  # Exit immediately if a command exits with a non-zero status
 
-if [ -z "$2" ]; then
-    read -p "Enter the remote server IP/hostname: " linux_host
-else
-    linux_host=$2
-fi
+# Function to log messages
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
 
-if [ -z "$3" ]; then
-    read -s -p "Enter the remote server password: " linux_password
-    echo
-else
-    linux_password=$3
-fi
+# Detect operating system
+log "Detecting the operating system..."
+if grep -Ei 'ubuntu|debian' /etc/os-release > /dev/null; then
+    OS="debian"
+    PKG_MANAGER="apt-get"
+    INSTALL_CMD="sudo apt-get install -y"
+    UPDATE_CMD="sudo apt-get update -y"
 
-# Ensure the arguments are provided
-if [[ -z "$linux_user" || -z "$linux_host" || -z "$linux_password" ]]; then
-    echo "Usage: $0 <user> <host> <password>"
+    # Grafana setup for Ubuntu/Debian
+    log "Setting up Grafana repository (Ubuntu/Debian)..."
+    sudo mkdir -p /etc/apt/keyrings
+    sudo chmod 0755 /etc/apt/keyrings
+
+    if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
+        curl -fsSL https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+    fi
+
+    if [ ! -f "/etc/apt/sources.list.d/grafana.list" ]; then
+        echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list > /dev/null
+    fi
+
+    log "Updating repositories..."
+    sudo apt-get update -y
+
+elif grep -Ei 'suse' /etc/os-release > /dev/null; then
+    OS="suse"
+    PKG_MANAGER="zypper"
+    INSTALL_CMD="sudo zypper install -y"
+    UPDATE_CMD="sudo zypper refresh"
+
+    # Grafana setup for SUSE
+    log "Setting up Grafana repository (SUSE)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    zypper addrepo https://rpm.grafana.com grafana
+
+    log "Updating repositories..."
+    sudo zypper update
+
+elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
+    OS="redhat"
+    PKG_MANAGER="yum"
+    INSTALL_CMD="sudo yum install -y || sudo dnf install -y"
+    UPDATE_CMD="sudo yum update -y || sudo dnf update -y"
+
+    # Grafana setup for RedHat/CentOS/Fedora
+    log "Setting up Grafana repository (RedHat/CentOS/Fedora)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    echo -e '[grafana]\nname=grafana\nbaseurl=https://rpm.grafana.com\nrepo_gpgcheck=1\nenabled=1\ngpgcheck=1\ngpgkey=https://rpm.grafana.com/gpg.key\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt' | sudo tee /etc/yum.repos.d/grafana.repo
+
+    log "Updating repositories..."
+    sudo yum update -y || sudo dnf update -y
+
+else
+    log "Unsupported operating system."
     exit 1
 fi
 
-# Use these variables for deployment actions
-echo "Connecting to $linux_user@$linux_host with password $linux_password"
+log "Operating system detected: $OS"
 
-# SSH into the remote server using sshpass (non-interactive password login)
-sshpass -p "$linux_password" ssh -t -o StrictHostKeyChecking=no "$linux_user@$linux_host" << EOF
+# Variables
+ALLOY_CONFIG_URL="http://10.0.34.144/config.alloy"
+API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
+HOST_IP=$(hostname -I | awk '{print $1}')
+ALLOY_PORT=8080
 
-    # Step 1: Enable Remote Write Receiver in Prometheus
-    echo "Enabling remote write receiver in Prometheus..."
-    
-    # Modify the Prometheus service file to include remote-write-receiver feature
-    PROMETHEUS_SERVICE_FILE="/etc/systemd/system/prometheus.service"
-    
-    if ! grep -q -- "--enable-feature=remote-write-receiver" "$PROMETHEUS_SERVICE_FILE"; then
-        echo "Adding --enable-feature=remote-write-receiver to Prometheus service..."
-        sudo sed -i '/ExecStart=\/usr\/bin\/prometheus/s/$/ --enable-feature=remote-write-receiver/' "$PROMETHEUS_SERVICE_FILE"
+# Update and install prerequisites
+log "Updating repositories..."
+$UPDATE_CMD
+
+log "Installing required packages..."
+install_packages() {
+    case $OS in
+        debian)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+        suse)
+            $INSTALL_CMD curl tar acl gpg2
+            ;;
+        redhat)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+    esac
+}
+install_packages
+
+# Check if Alloy package is installed, else try to install manually
+install_alloy() {
+    if ! command -v alloy &> /dev/null; then
+        log "Alloy package not found. Attempting installation via package manager..."
+
+        case $OS in
+            debian|ubuntu)
+                sudo apt-get install -y alloy
+                ;;
+            suse)
+                sudo zypper install -y alloy
+                ;;
+            redhat|centos|fedora)
+                sudo yum install -y alloy || sudo dnf install -y alloy
+                ;;
+            *)
+                log "Unsupported OS for Alloy installation"
+                exit 1
+                ;;
+        esac
     else
-        echo "Remote write receiver feature already enabled in Prometheus service."
+        log "Alloy is already installed."
     fi
+}
 
-    # Reload systemd to apply the changes to the service file
-    echo "Reloading systemd daemon..."
-    sudo systemctl daemon-reload
 
-    # Restart Prometheus service
-    echo "Restarting Prometheus service..."
-    sudo systemctl restart prometheus.service
+log "Installing Alloy..."
+install_alloy
 
-    # Check Prometheus service status
-    echo "Checking Prometheus service status..."
-    sudo systemctl status prometheus.service --no-pager
+# Setup Alloy
+log "Setting up Alloy..."
+sudo mkdir -p /etc/alloy
+sudo chmod 0755 /etc/alloy
 
-    # Step 2: Grafana Alloy Installation and Configuration
+# Make the config setup OS specific
+case $OS in
+    debian)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo apt-get install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    suse)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo zypper install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    redhat)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo yum install -y acl || sudo dnf install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+esac
 
-    echo "Starting Grafana Alloy Installation..."
+# Setup Alloy service
+log "Setting up Alloy service..."
+cat << EOF | sudo tee /etc/systemd/system/alloy.service > /dev/null
+[Unit]
+Description=Alloy Service
+After=network.target
 
-    # Install necessary tools and import GPG key
-    echo "Installing GPG and adding Grafana package repository..."
-    sudo apt-get update -y
-    sudo apt-get install -y gpg wget
+[Service]
+ExecStart=/usr/bin/alloy
+Restart=always
 
-    # Step 3: Add Grafana GPG key and repository
-    echo "Adding Grafana GPG key..."
-    sudo mkdir -p /etc/apt/keyrings/
-    sudo wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
-    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
-
-    # Step 4: Update apt repositories
-    echo "Updating repositories..."
-    sudo apt-get update -y
-
-    # Step 5: Install Alloy
-    echo "Installing Alloy..."
-    if ! dpkg -l | grep -q alloy; then
-        sudo apt-get install -y alloy
-    fi
-
-    # Step 6: Create Alloy directory if it doesn't exist
-    echo "Creating Alloy directory..."
-    sudo mkdir -p /etc/alloy
-    sudo chmod 0755 /etc/alloy
-
-    # Step 7: Backup the default Alloy configuration file
-    echo "Backing up default Alloy config file..."
-    if [ -f "/etc/alloy/config.alloy" ]; then
-        sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
-    fi
-
-    # Step 8: Install ACL package
-    echo "Installing acl..."
-    sudo apt-get install -y acl
-
-    # Step 9: Set ACL permissions for the Alloy user on /var/log
-    echo "Setting ACL permissions for Alloy user on /var/log..."
-    sudo setfacl -m u:alloy:r /var/log
-    sudo setfacl -d -m u:alloy:r /var/log
-
-    # Step 10: Copy the Alloy config file from local path
-    echo "Copying the Alloy config file..."
-    if [ -f "/home/$linux_user/config.alloy" ]; then
-        sudo cp /home/$linux_user/config.alloy /etc/alloy/config.alloy
-    else
-        echo "ERROR: config.alloy file not found at /home/$linux_user/config.alloy"
-        exit 1
-    fi
-
-    # Step 11: Enable and restart Alloy service
-    echo "Enabling and restarting Alloy service..."
-    sudo systemctl enable alloy
-    sudo systemctl restart alloy
-
-    # Step 12: Check Alloy service status
-    echo "Checking Alloy service status..."
-    sudo systemctl status alloy --no-pager
-
+[Install]
+WantedBy=multi-user.target
 EOF
 
-echo "Deployment completed on $linux_host."
+sudo systemctl daemon-reload
+sudo systemctl enable alloy
+sudo systemctl start alloy
+
+log "Alloy service status:"
+sudo systemctl status alloy
+
+# Create new agent
+log "Creating new agent..."
+response=$(curl -k -v -s -w "\n%{http_code}" -X POST "$API_ENDPOINT" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "host_name": "'"$HOSTNAME"'",
+        "ip_port": "'"$HOST_IP:$ALLOY_PORT"'",
+        "keycloak_id": "'"$OMEGA_UID"'",
+        "agent_name": "'"$AGENT_NAME"'",
+        "status": "Active"
+    }')
+
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+log "Response Code: $http_code"
+log "Response Body: $body"
+
+# Handle different response codes
+if [[ "$http_code" == "201" ]]; then
+    log "Agent created successfully."
+elif [[ "$body" == *"UNIQUE constraint failed"* ]]; then
+    log "ERROR: IP:PORT combination already exists"
+elif [[ "$http_code" == "400" ]]; then
+    log "Bad Request: Check the data sent to the API."
+elif [[ "$http_code" == "401" ]]; then
+    log "Unauthorized: Authentication failed. Check the API credentials."
+elif [[ "$http_code" == "500" ]]; then
+    log "Server error: The API endpoint is likely down."
+else
+    log "Agent creation failed. Response code: $http_code"
+    log "Full response body: $body"
+fi
