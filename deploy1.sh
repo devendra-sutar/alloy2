@@ -1,99 +1,209 @@
 #!/bin/bash
 
-# Prompt for input if variables are not passed as arguments
-if [ -z "$1" ]; then
-    read -p "Enter the remote server username: " linux_user
-else
-    linux_user=$1
-fi
+set -e  # Exit immediately if a command exits with a non-zero status
 
-if [ -z "$2" ]; then
-    read -p "Enter the remote server IP/hostname: " linux_host
-else
-    linux_host=$2
-fi
+# Function to log messages
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
 
-if [ -z "$3" ]; then
-    read -s -p "Enter the remote server password: " linux_password
-    echo
-else
-    linux_password=$3
-fi
+# Detect operating system
+log "Detecting the operating system..."
+if grep -Ei 'ubuntu|debian' /etc/os-release > /dev/null; then
+    OS="debian"
+    PKG_MANAGER="apt-get"
+    INSTALL_CMD="sudo apt-get install -y"
+    UPDATE_CMD="sudo apt-get update -y"
 
-# Ensure the arguments are provided
-if [[ -z "$linux_user" || -z "$linux_host" || -z "$linux_password" ]]; then
-    echo "Usage: $0 <user> <host> <password>"
-    exit 1
-fi
-
-# Use these variables for deployment actions
-echo "Connecting to $linux_user@$linux_host with password $linux_password"
-
-# SSH into the remote server using sshpass (non-interactive password login)
-sshpass -p "$linux_password" ssh -t -o StrictHostKeyChecking=no "$linux_user@$linux_host" << EOF
-    # Update package lists
-    echo "Updating package lists..."
-    sudo apt-get update -y
-
-    # Install GPG if not present
-    echo "Installing gnupg..."
-    sudo apt-get install -y gnupg
-
-    # Create the directory for APT keyrings
-    echo "Creating APT keyring directory..."
+    # Grafana setup for Ubuntu/Debian
+    log "Setting up Grafana repository (Ubuntu/Debian)..."
     sudo mkdir -p /etc/apt/keyrings
     sudo chmod 0755 /etc/apt/keyrings
 
-    # Add Grafana GPG key if it doesn't exist
-    echo "Adding Grafana GPG key..."
     if [ ! -f "/etc/apt/keyrings/grafana.gpg" ]; then
-        wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+        curl -fsSL https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
     fi
 
-    # Add Grafana repository if not already added
-    echo "Adding Grafana repository..."
     if [ ! -f "/etc/apt/sources.list.d/grafana.list" ]; then
-        echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+        echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list > /dev/null
     fi
 
-    # Install Alloy if not already installed
-    echo "Installing Alloy..."
-    if ! dpkg -l | grep -q alloy; then
-        sudo apt-get install -y alloy
+    log "Updating repositories..."
+    sudo apt-get update -y
+
+elif grep -Ei 'suse' /etc/os-release > /dev/null; then
+    OS="suse"
+    PKG_MANAGER="zypper"
+    INSTALL_CMD="sudo zypper install -y"
+    UPDATE_CMD="sudo zypper refresh"
+
+    # Grafana setup for SUSE
+    log "Setting up Grafana repository (SUSE)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    zypper addrepo https://rpm.grafana.com grafana
+
+    log "Updating repositories..."
+    sudo zypper update
+
+elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
+    OS="redhat"
+    PKG_MANAGER="yum"
+    INSTALL_CMD="sudo yum install -y || sudo dnf install -y"
+    UPDATE_CMD="sudo yum update -y || sudo dnf update -y"
+
+    # Grafana setup for RedHat/CentOS/Fedora
+    log "Setting up Grafana repository (RedHat/CentOS/Fedora)..."
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    rpm --import gpg.key
+    echo -e '[grafana]\nname=grafana\nbaseurl=https://rpm.grafana.com\nrepo_gpgcheck=1\nenabled=1\ngpgcheck=1\ngpgkey=https://rpm.grafana.com/gpg.key\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt' | sudo tee /etc/yum.repos.d/grafana.repo
+
+    log "Updating repositories..."
+    sudo yum update -y || sudo dnf update -y
+
+else
+    log "Unsupported operating system."
+    exit 1
+fi
+
+log "Operating system detected: $OS"
+
+# Variables
+ALLOY_CONFIG_URL="http://10.0.34.144/config.alloy"
+API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
+HOST_IP=$(hostname -I | awk '{print $1}')
+ALLOY_PORT=8080
+
+# Update and install prerequisites
+log "Updating repositories..."
+$UPDATE_CMD
+
+log "Installing required packages..."
+install_packages() {
+    case $OS in
+        debian)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+        suse)
+            $INSTALL_CMD curl tar acl gpg2
+            ;;
+        redhat)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+    esac
+}
+install_packages
+
+# Check if Alloy package is installed, else try to install manually
+install_alloy() {
+    if ! command -v alloy &> /dev/null; then
+        log "Alloy package not found. Attempting manual installation..."
+
+        case $OS in
+            debian)
+                # Example: Download and install a .deb package
+                curl -LO <URL_TO_ALLYOY_PACKAGE>.deb
+                sudo dpkg -i <alloy-package>.deb
+                sudo apt-get install -f
+                ;;
+            suse)
+                # Example: Download and install an .rpm package for SUSE
+                wget <URL_TO_ALLYOY_PACKAGE>.rpm
+                sudo rpm -i <alloy-package>.rpm
+                ;;
+            redhat)
+                # Example: Download and install an .rpm package for RedHat
+                wget <URL_TO_ALLYOY_PACKAGE>.rpm
+                sudo rpm -i <alloy-package>.rpm
+                ;;
+            *)
+                log "Unsupported OS for manual Alloy installation"
+                exit 1
+                ;;
+        esac
+    else
+        log "Alloy is already installed."
     fi
+}
 
-    # Create /etc/alloy directory if not exists
-    echo "Creating Alloy directory..."
-    sudo mkdir -p /etc/alloy
-    sudo chmod 0755 /etc/alloy
+log "Installing Alloy..."
+install_alloy
 
-    # Backup config.alloy if it exists
-    echo "Backing up config.alloy..."
-    if [ -f "/etc/alloy/config.alloy" ]; then
-        sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
-    fi
+# Setup Alloy
+log "Setting up Alloy..."
+sudo mkdir -p /etc/alloy
+sudo chmod 0755 /etc/alloy
 
-    # Install acl if not installed
-    echo "Installing acl..."
-    sudo apt-get install -y acl
+# Make the config setup OS specific
+case $OS in
+    debian)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo apt-get install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    suse)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo zypper install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+    redhat)
+        [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
+        sudo yum install -y acl || sudo dnf install -y acl
+        log "Setting ACL for alloy user on /var/log..."
+        sudo setfacl -dR -m u:alloy:r /var/log/
+        sudo curl -fsSL -o /etc/alloy/config.alloy "$ALLOY_CONFIG_URL" || { log "Failed to download config file"; exit 1; }
+        ;;
+esac
 
-    # Set ACL for alloy user on /var/log
-    echo "Setting ACL for alloy user on /var/log..."
-    sudo setfacl -m u:alloy:r /var/log
-    sudo setfacl -d -m u:alloy:r /var/log
+# Setup Alloy service
+log "Setting up Alloy service..."
+cat << EOF | sudo tee /etc/systemd/system/alloy.service > /dev/null
+[Unit]
+Description=Alloy Service
+After=network.target
 
-    # Copy the Alloy config file
-    echo "Copying the Alloy config file..."
-    sudo cp /home/ubuntu/config.alloy /etc/alloy/config.alloy
+[Service]
+ExecStart=/usr/bin/alloy
+Restart=always
 
-    # Enable and restart Alloy service
-    echo "Enabling and restarting Alloy service..."
-    sudo systemctl enable alloy
-    sudo systemctl restart alloy
-
-    # Check Alloy service status
-    echo "Checking Alloy service status..."
-    sudo systemctl status alloy
+[Install]
+WantedBy=multi-user.target
 EOF
 
-echo "Deployment completed on $linux_host."
+sudo systemctl daemon-reload
+sudo systemctl enable alloy
+sudo systemctl start alloy
+
+log "Alloy service status:"
+sudo systemctl status alloy
+
+# Create new agent
+log "Creating new agent..."
+response=$(curl -s -w "\n%{http_code}" -X POST "$API_ENDPOINT" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "host_name": "'"$HOSTNAME"'",
+        "ip_port": "'"$HOST_IP:$ALLOY_PORT"'",
+        "keycloak_id": "'"$OMEGA_UID"'",
+        "agent_name": "'"$AGENT_NAME"'",
+        "status": "Active"
+    }')
+
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+log "Response Code: $http_code"
+log "Response Body: $body"
+
+if [[ "$http_code" == "201" ]]; then
+    log "Agent created successfully."
+elif [[ "$body" == *"UNIQUE constraint failed"* ]]; then
+    log "ERROR: IP:PORT combination already exists"
+else
+    log "Agent creation failed. Response code: $http_code"
+    log "Full response body: $body"
+fi
