@@ -59,6 +59,7 @@ sudo chmod 0755 /etc/alloy
 
 [ -f "/etc/alloy/config.alloy" ] && sudo cp /etc/alloy/config.alloy /etc/alloy/config.alloy.backup
 
+sudo apt-get install -y acl
 log "Setting ACL for alloy user on /var/log..."
 sudo setfacl -dR -m u:alloy:r /var/log/
 
