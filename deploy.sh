@@ -173,7 +173,7 @@ Description=Alloy Service
 After=network.target
 
 [Service]
-ExecStart=$ALLOY_INSTALL_DIR/alloy
+ExecStart=/usr/bin/alloy
 Restart=always
 
 [Install]
