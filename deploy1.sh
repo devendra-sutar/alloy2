@@ -183,7 +183,7 @@ sudo systemctl status alloy
 
 # Create new agent
 log "Creating new agent..."
-response=$(curl -s -w "\n%{http_code}" -X POST "$API_ENDPOINT" \
+response=$(curl -k -v -s -w "\n%{http_code}" -X POST "$API_ENDPOINT" \
     -H "Content-Type: application/json" \
     -d '{
         "host_name": "'"$HOSTNAME"'",
@@ -199,10 +199,17 @@ body=$(echo "$response" | sed '$d')
 log "Response Code: $http_code"
 log "Response Body: $body"
 
+# Handle different response codes
 if [[ "$http_code" == "201" ]]; then
     log "Agent created successfully."
 elif [[ "$body" == *"UNIQUE constraint failed"* ]]; then
     log "ERROR: IP:PORT combination already exists"
+elif [[ "$http_code" == "400" ]]; then
+    log "Bad Request: Check the data sent to the API."
+elif [[ "$http_code" == "401" ]]; then
+    log "Unauthorized: Authentication failed. Check the API credentials."
+elif [[ "$http_code" == "500" ]]; then
+    log "Server error: The API endpoint is likely down."
 else
     log "Agent creation failed. Response code: $http_code"
     log "Full response body: $body"
