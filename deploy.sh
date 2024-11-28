@@ -39,51 +39,56 @@ API_ENDPOINT="https://10.0.34.181:8000/api/v1/agents/"
 HOST_IP=$(hostname -I | awk '{print $1}')
 ALLOY_PORT=8080
 
-# Function to install packages
-install_package() {
-    if [ "$OS" == "debian" ]; then
-        if ! dpkg -l | grep -q "$1"; then
-            log "Installing $1..."
-            $INSTALL_CMD "$1"
-        else
-            log "$1 is already installed."
-        fi
-    elif [ "$OS" == "suse" ] || [ "$OS" == "redhat" ]; then
-        if ! rpm -q "$1" > /dev/null; then
-            log "Installing $1..."
-            $INSTALL_CMD "$1"
-        else
-            log "$1 is already installed."
-        fi
-    fi
-}
-
 # Update and install prerequisites
 log "Updating repositories..."
 $UPDATE_CMD
 
-install_package curl
-install_package tar
-install_package acl
+log "Installing required packages..."
+install_packages() {
+    case $OS in
+        debian)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+        suse)
+            $INSTALL_CMD curl tar acl gpg2
+            ;;
+        redhat)
+            $INSTALL_CMD curl tar acl gpg
+            ;;
+    esac
+}
+install_packages
 
 # Download and install Alloy from GitHub
-log "Downloading the latest release of Alloy from GitHub..."
+log "Fetching the latest release information from GitHub..."
 response=$(curl -s "$GITHUB_REPO")
-download_url=$(echo "$response" | grep "browser_download_url" | grep "linux" | cut -d '"' -f 4)
+
+if [ -z "$response" ]; then
+    log "Failed to fetch release information from GitHub."
+    exit 1
+fi
+
+# Extract the download URL for Linux
+log "Parsing release information..."
+download_url=$(echo "$response" | grep -oP '"browser_download_url":\s*"\K.*linux.*(?=")')
 
 if [ -z "$download_url" ]; then
-    log "Failed to find a download URL for the latest release."
+    log "Failed to find a suitable download URL for Linux in the latest release."
+    log "Available assets in the latest release:"
+    echo "$response" | grep -oP '"name":\s*"\K.*(?=")'
     exit 1
 fi
 
 log "Download URL: $download_url"
+
 temp_dir=$(mktemp -d)
+log "Downloading Alloy from $download_url..."
 curl -L -o "$temp_dir/alloy.tar.gz" "$download_url"
 
 log "Extracting Alloy..."
 sudo tar -xzf "$temp_dir/alloy.tar.gz" -C "$ALLOY_INSTALL_DIR"
 
-log "Cleaning up..."
+log "Cleaning up temporary files..."
 rm -rf "$temp_dir"
 
 # Ensure Alloy binary is executable
