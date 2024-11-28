@@ -132,7 +132,10 @@ install_packages
 # sudo chmod +x "$ALLOY_INSTALL_DIR/alloy"
 
 # Setup Alloy
+log "Installing Alloy..."
+install_package alloy || { log "Alloy package not found. Please check the repository setup."; exit 1; }
 sudo apt install alloy -y
+
 log "Setting up Alloy..."
 sudo mkdir -p /etc/alloy
 sudo chmod 0755 /etc/alloy
