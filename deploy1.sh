@@ -37,6 +37,8 @@ elif grep -Ei 'suse' /etc/os-release > /dev/null; then
     INSTALL_CMD="sudo zypper install -y"
     UPDATE_CMD="sudo zypper refresh"
 
+sudo zypper removerepo grafana
+
    # Log message
 echo "Setting up Grafana repository (SUSE)..."
 
