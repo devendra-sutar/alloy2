@@ -55,7 +55,8 @@ if ! zypper lr | grep -q "https://rpm.grafana.com"; then
 else
     echo "Grafana repository already exists. Skipping..."
 fi
-
+log "Updating repositories..."
+sudo zypper update
 
 elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
     OS="redhat"
