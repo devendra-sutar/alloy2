@@ -43,8 +43,10 @@ echo "Setting up Grafana repository (SUSE)..."
 # Log message
 echo "Setting up Grafana repository (SUSE)..."
 
-# Check if the Grafana repository already exists by alias
-if ! zypper lr | grep -q "^ *[0-9]\+  *grafana "; then
+# Check if Grafana repository exists by alias or URL
+if zypper lr -u | grep -q "https://rpm.grafana.com"; then
+    echo "Grafana repository already exists. Skipping addition."
+else
     echo "Grafana repository not found. Adding it now..."
     
     # Download and import the GPG key
@@ -55,9 +57,8 @@ if ! zypper lr | grep -q "^ *[0-9]\+  *grafana "; then
     sudo zypper addrepo https://rpm.grafana.com grafana
 
     echo "Grafana repository added successfully."
-else
-    echo "Grafana repository already exists. Skipping..."
 fi
+
 
 log "Updating repositories..."
 sudo zypper update
