@@ -40,8 +40,11 @@ elif grep -Ei 'suse' /etc/os-release > /dev/null; then
    # Log message
 echo "Setting up Grafana repository (SUSE)..."
 
-# Check if Grafana repository already exists
-if ! zypper lr | grep -q "https://rpm.grafana.com"; then
+# Log message
+echo "Setting up Grafana repository (SUSE)..."
+
+# Check if the Grafana repository already exists by alias
+if ! zypper lr | grep -q "^ *[0-9]\+  *grafana "; then
     echo "Grafana repository not found. Adding it now..."
     
     # Download and import the GPG key
@@ -55,6 +58,7 @@ if ! zypper lr | grep -q "https://rpm.grafana.com"; then
 else
     echo "Grafana repository already exists. Skipping..."
 fi
+
 log "Updating repositories..."
 sudo zypper update
 
