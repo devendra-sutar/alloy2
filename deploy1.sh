@@ -68,8 +68,8 @@ sudo zypper update
 elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
     OS="redhat"
     PKG_MANAGER="yum"
-    INSTALL_CMD="sudo yum install -y || sudo dnf install -y"
-    UPDATE_CMD="sudo yum update -y || sudo dnf update -y"
+    INSTALL_CMD="sudo yum install -y"  # Fixing this part for yum
+    UPDATE_CMD="sudo yum update -y"    # Fixing this part for yum
 
     # Grafana setup for RedHat/CentOS/Fedora
     log "Setting up Grafana repository (RedHat/CentOS/Fedora)..."
