@@ -37,14 +37,25 @@ elif grep -Ei 'suse' /etc/os-release > /dev/null; then
     INSTALL_CMD="sudo zypper install -y"
     UPDATE_CMD="sudo zypper refresh"
 
-    # Grafana setup for SUSE
-    log "Setting up Grafana repository (SUSE)..."
-    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
-    rpm --import gpg.key
-    zypper addrepo https://rpm.grafana.com grafana
+   # Log message
+echo "Setting up Grafana repository (SUSE)..."
 
-    log "Updating repositories..."
-    sudo zypper update
+# Check if Grafana repository already exists
+if ! zypper lr | grep -q "https://rpm.grafana.com"; then
+    echo "Grafana repository not found. Adding it now..."
+    
+    # Download and import the GPG key
+    wget -q -O gpg.key https://rpm.grafana.com/gpg.key
+    sudo rpm --import gpg.key
+
+    # Add the Grafana repository
+    sudo zypper addrepo https://rpm.grafana.com grafana
+
+    echo "Grafana repository added successfully."
+else
+    echo "Grafana repository already exists. Skipping..."
+fi
+
 
 elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
     OS="redhat"
@@ -97,27 +108,20 @@ install_packages
 # Check if Alloy package is installed, else try to install manually
 install_alloy() {
     if ! command -v alloy &> /dev/null; then
-        log "Alloy package not found. Attempting manual installation..."
+        log "Alloy package not found. Attempting installation via package manager..."
 
         case $OS in
-            debian)
-                # Example: Download and install a .deb package
-                curl -LO <URL_TO_ALLYOY_PACKAGE>.deb
-                sudo dpkg -i <alloy-package>.deb
-                sudo apt-get install -f
+            debian|ubuntu)
+                sudo apt-get install -y alloy
                 ;;
             suse)
-                # Example: Download and install an .rpm package for SUSE
-                wget <URL_TO_ALLYOY_PACKAGE>.rpm
-                sudo rpm -i <alloy-package>.rpm
+                sudo zypper install -y alloy
                 ;;
-            redhat)
-                # Example: Download and install an .rpm package for RedHat
-                wget <URL_TO_ALLYOY_PACKAGE>.rpm
-                sudo rpm -i <alloy-package>.rpm
+            redhat|centos|fedora)
+                sudo yum install -y alloy || sudo dnf install -y alloy
                 ;;
             *)
-                log "Unsupported OS for manual Alloy installation"
+                log "Unsupported OS for Alloy installation"
                 exit 1
                 ;;
         esac
@@ -125,6 +129,7 @@ install_alloy() {
         log "Alloy is already installed."
     fi
 }
+
 
 log "Installing Alloy..."
 install_alloy
