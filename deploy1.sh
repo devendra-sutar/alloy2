@@ -78,12 +78,24 @@ elif grep -Ei 'fedora|red hat|centos|rhel' /etc/os-release > /dev/null; then
     echo -e '[grafana]\nname=grafana\nbaseurl=https://rpm.grafana.com\nrepo_gpgcheck=1\nenabled=1\ngpgcheck=1\ngpgkey=https://rpm.grafana.com/gpg.key\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt' | sudo tee /etc/yum.repos.d/grafana.repo
 
     log "Updating repositories..."
-    sudo yum update -y || sudo dnf update -y
+
+    # Check for dnf or yum and run update command accordingly
+    if command -v dnf &>/dev/null; then
+        # If dnf is available, use it for Fedora/CentOS/RHEL
+        sudo dnf update -y
+    elif command -v yum &>/dev/null; then
+        # If yum is available, use it for CentOS/RHEL
+        sudo yum update -y
+    else
+        log "Error: Neither yum nor dnf is installed. Unable to update repositories."
+        exit 1
+    fi
 
 else
     log "Unsupported operating system."
     exit 1
 fi
+
 
 log "Operating system detected: $OS"
 
