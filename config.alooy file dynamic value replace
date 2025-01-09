@@ -1,0 +1,109 @@
+#!/bin/bash
+INSTANCE_IP=$(hostname -I | awk '{print $1}')
+
+cat <<EOF > /home/ubuntu/config1.alloy
+prometheus.exporter.self "integrations_alloy" { }
+
+discovery.relabel "integrations_alloy" {
+  targets = prometheus.exporter.self.integrations_alloy.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "alloy_hostname"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/alloy-check"
+  }
+}
+
+prometheus.scrape "integrations_alloy" {
+  targets    = discovery.relabel.integrations_alloy.output
+  forward_to = [prometheus.remote_write.local_prom.receiver]  
+
+  scrape_interval = "60s"
+}
+prometheus.remote_write "local_prom" {
+  endpoint {
+    url = "http://${INSTANCE_IP}:9090/api/v1/write" //define prometheus server endpoint
+
+  }
+}
+
+loki.write "local_loki" {
+  endpoint {
+    url = "http://${INSTANCE_IP}:3100/loki/api/v1/push" //define loki server endpoint
+
+  }
+}
+
+prometheus.exporter.unix "integrations_node_exporter" { 
+}
+
+discovery.relabel "integrations_node_exporter" {
+  targets = prometheus.exporter.unix.integrations_node_exporter.targets
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement = "integrations/node_exporter"
+  }
+}
+
+prometheus.scrape "integrations_node_exporter" {
+  targets    = discovery.relabel.integrations_node_exporter.output
+  forward_to = [prometheus.remote_write.local_prom.receiver]
+}
+
+//Collect logs
+loki.source.journal "logs_journal_scrape" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.logs_journal_scrape.rules
+  forward_to    = [loki.write.local_loki.receiver]
+}
+
+local.file_match "logs_direct_scrape" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/var/log/{syslog,messages,*.log}",
+    instance    = constants.hostname,
+    job         = "integrations/node_exporter",
+  }]
+}
+discovery.relabel "logs_journal_scrape" {
+  targets = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
+  }
+
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.file "logs_direct_scrape" {
+  targets    = local.file_match.logs_direct_scrape.targets
+  forward_to = [loki.write.local_loki.receiver]
+}
+
+EOF
