@@ -1,59 +1,14 @@
-ip r
-default via 10.0.34.1 dev ens3 proto dhcp src 10.0.34.39 metric 100 
-8.8.8.8 via 10.0.34.1 dev ens3 proto dhcp src 10.0.34.39 metric 100 
-10.0.32.0/23 via 10.0.34.1 dev ens3 
-10.0.32.25 via 10.0.34.1 dev ens3 proto dhcp src 10.0.34.39 metric 100 
-10.0.34.0/23 dev ens3 proto kernel scope link src 10.0.34.39 metric 100 
-10.0.34.1 dev ens3 proto dhcp scope link src 10.0.34.39 metric 100 
-10.0.34.21 dev ens3 proto dhcp scope link src 10.0.34.39 metric 100 
-blackhole 192.168.143.128/26 proto 80 
-192.168.143.129 dev cali57b0b9832c3 scope link 
-192.168.143.149 dev cali5507ece26e6 scope link 
-192.168.143.167 dev cali046b8f261f2 scope link 
-192.168.143.170 dev cali71ace67b4ad scope link 
-192.168.143.176 dev cali8c8cbeaed3b scope link 
-192.168.143.179 dev cali441e7154991 scope link 
-ubuntu@cllst:~$ ip a s
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host noprefixroute 
-       valid_lft forever preferred_lft forever
-2: ens3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
-    link/ether 1e:00:51:00:00:13 brd ff:ff:ff:ff:ff:ff
-    altname enp0s3
-    inet 10.0.34.39/23 metric 100 brd 10.0.35.255 scope global ens3
-       valid_lft forever preferred_lft forever
-    inet6 fe80::1c00:51ff:fe00:13/64 scope link 
-       valid_lft forever preferred_lft forever
-3: cali046b8f261f2@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-c709afb9-dad8-dea7-e61a-dd433121464d
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-4: cali8c8cbeaed3b@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-2fc02f86-ea39-6902-bb3f-3570cb9a9ceb
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-5: cali71ace67b4ad@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-51c70f2b-a934-3746-701a-6e284008d124
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-6: cali57b0b9832c3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-59eed112-6c04-681a-87b9-eba2c7e999bd
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-7: cali441e7154991@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-55c8061c-bd3a-eddb-a9cb-13cfdf8e5709
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-8: cali5507ece26e6@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
-    link/ether ee:ee:ee:ee:ee:ee brd ff:ff:ff:ff:ff:ff link-netns cni-030735aa-5e37-351c-c892-e4040ee1886a
-    inet6 fe80::ecee:eeff:feee:eeee/64 scope link 
-       valid_lft forever preferred_lft forever
-11: vxlan.calico: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/ether 66:72:0e:67:0c:d2 brd ff:ff:ff:ff:ff:ff
-    inet 192.168.143.128/32 scope global vxlan.calico
-       valid_lft forever preferred_lft forever
-    inet6 fe80::6472:eff:fe67:cd2/64 scope link 
-       valid_lft forever preferred_lft forever
+kubectl logs my-agent-69dfdbb78-pzsq5    -n default
+2025/10/28 09:55:27 Agent initialized with ID: c62bb2a4-7ff5-4bf4-9885-83a276b909e9
+2025/10/28 09:55:27 Backend URL: https://10.0.32.106:8006/api/v2.0/onboard
+2025/10/28 09:55:27 ---------------------------> WebSocket server with Agent started successfully on port 9000 <-------------------------------
+2025/10/28 09:55:29 Initiating automatic onboarding...
+2025/10/28 09:55:29 Sending onboarding request via HTTP API...
+2025/10/28 09:55:30 Connecting to backend WebSocket: wss://10.0.32.106:8006/api/v2.0/ws
+2025/10/28 09:55:30 WARNING: TLS verification disabled - only use in development
+2025/10/28 09:55:30 Warning: Could not connect to backend WebSocket: websocket: bad handshake (continuing with HTTP only)
+Found 1 nodes in cluster
+Kubernetes version: v1.28.15
+Found 7 namespaces in cluster
+Onboarding API called successfully for cluster my-test-cluster
+2025/10/28 09:55:32 Onboarding API call successful
