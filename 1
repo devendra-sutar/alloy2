@@ -1,14 +1,169 @@
-kubectl logs my-agent-69dfdbb78-pzsq5    -n default
-2025/10/28 09:55:27 Agent initialized with ID: c62bb2a4-7ff5-4bf4-9885-83a276b909e9
-2025/10/28 09:55:27 Backend URL: https://10.0.32.106:8006/api/v2.0/onboard
-2025/10/28 09:55:27 ---------------------------> WebSocket server with Agent started successfully on port 9000 <-------------------------------
-2025/10/28 09:55:29 Initiating automatic onboarding...
-2025/10/28 09:55:29 Sending onboarding request via HTTP API...
-2025/10/28 09:55:30 Connecting to backend WebSocket: wss://10.0.32.106:8006/api/v2.0/ws
-2025/10/28 09:55:30 WARNING: TLS verification disabled - only use in development
-2025/10/28 09:55:30 Warning: Could not connect to backend WebSocket: websocket: bad handshake (continuing with HTTP only)
-Found 1 nodes in cluster
-Kubernetes version: v1.28.15
-Found 7 namespaces in cluster
-Onboarding API called successfully for cluster my-test-cluster
-2025/10/28 09:55:32 Onboarding API call successful
+# ========================================
+# 0. ServiceAccount
+# ========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubesage-agent-sa
+  namespace: default
+
+---
+# ========================================
+# 1. ConfigMap – non-sensitive .env (no secrets)
+# ========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-env
+  namespace: default
+data:
+  .env: |
+    # Cluster Configuration
+    CLUSTER_NAME=dev-kubesage-cluster-123
+    AGENT_HOST= 0.0.0.0
+    # Backend Configuration
+    BACKEND_URL=https://10.0.34.108:8006/api/v2.0/onboard
+    BACKEND_WS_URL=wss://10.0.34.108:8006/api/v2.0/ws
+
+    # WebSocket Server
+    PORT=9000
+
+    # Security
+    SKIP_TLS_VERIFY=true
+
+    # Logging
+    DEBUG=true
+    LOG_LEVEL=INFO
+
+---
+# ========================================
+# 2. Secret – sensitive values (base64 encoded)
+# ========================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubesage-agent-secret
+  namespace: default
+type: Opaque
+data:
+  # Base64 encoded values
+  AGENT_ID: NmQ3NTFhN2YtMzIyNS00MDE4LWI4NzctYzI4ZmZkODM0YjEz
+  API_KEY: a3NfQkdJY2R4djFaWncySGpBTDY5SzhGVEVvdEQ5Y2hkdmY=
+
+---
+# ========================================
+# 3. RBAC: ClusterRole
+# ========================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubesage-agent-role
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "namespaces", "pods", "services", "persistentvolumes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ========================================
+# 4. RBAC: ClusterRoleBinding
+# ========================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubesage-agent-binding
+subjects:
+- kind: ServiceAccount
+  name: kubesage-agent-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: kubesage-agent-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ========================================
+# 5. Deployment – uses Secret + ConfigMap + hostNetwork + RBAC
+# ========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-agent
+  namespace: default
+  labels:
+    app: my-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-agent
+  template:
+    metadata:
+      labels:
+        app: my-agent
+    spec:
+      # === FIX 1: Network access ===
+      #hostNetwork: true
+      #dnsPolicy: ClusterFirstWithHostNet
+
+      # === FIX 2: RBAC ===
+      serviceAccountName: kubesage-agent-sa
+
+      containers:
+        - name: agent
+          image: devendra750/onboard:v3   # CHANGE TO YOUR IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9000
+
+          # === 1. Mount .env from ConfigMap ===
+          volumeMounts:
+            - name: env-volume
+              mountPath: /app/.env
+              subPath: .env
+
+          # === 2. Inject Secret as environment variables ===
+          envFrom:
+            - secretRef:
+                name: kubesage-agent-secret
+
+          # === 3. Optional: Override specific values ===
+          env:
+            - name: CLUSTER_NAME
+              value: "dev-kubesage-cluster-123"
+            - name: AGENT_HOST
+              value: "0.0.0.0"
+            - name: BACKEND_URL
+              value: "https://10.0.34.108:8006/api/v2.0/onboard"
+            - name: BACKEND_WS_URL
+              value: "wss://10.0.34.108:8006/api/v2.0/ws"
+
+      # === Volumes ===
+      volumes:
+        - name: env-volume
+          configMap:
+            name: agent-env
+
+---
+# ========================================
+# 6. Service – external access via NodePort
+# ========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-agent-svc
+  namespace: default
+spec:
+  selector:
+    app: my-agent
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+      nodePort: 31245   # Manually assigned NodePort
+  type: NodePort
