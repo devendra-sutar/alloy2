@@ -1,1 +1,14 @@
-d
+kubectl logs my-agent-67bd4dd6b4-tlzvf
+2025/10/29 10:50:46 Agent initialized with ID: 6212a5ef-cd27-49c3-9c10-41910019aca9
+2025/10/29 10:50:46 Backend URL: https://10.0.34.108:8006/api/v2.0/onboard
+2025/10/29 10:50:46 ---------------------------> WebSocket server with Agent started successfully on 0.0.0.0:9000 <-------------------------------
+2025/10/29 10:50:48 Initiating automatic onboarding...
+2025/10/29 10:50:48 Sending onboarding request via HTTP API...
+2025/10/29 10:50:49 Connecting to backend WebSocket: wss://10.0.34.108:8006/api/v2.0/ws
+2025/10/29 10:50:49 WARNING: TLS verification disabled - only use in development
+2025/10/29 10:50:49 Warning: Could not connect to backend WebSocket: websocket: bad handshake (continuing with HTTP only)
+Warning: Could not check agent registration status: failed to send clusters list request: Get "https://10.0.34.108:8006/api/v2.0/clusters": net/http: invalid header field value for "X-Api-Key" (proceeding with onboarding)
+Found 1 nodes in cluster
+Kubernetes version: v1.28.15
+Found 9 namespaces in cluster
+2025/10/29 10:50:51 Error calling onboarding API: failed to send HTTP request: Post "https://10.0.34.108:8006/api/v2.0/onboard": net/http: invalid header field value for "X-Api-Key"
