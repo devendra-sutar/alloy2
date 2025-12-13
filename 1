@@ -56,7 +56,48 @@ docker save os3infotech/monitoring-stack:v1.0.0 -o monitoring-stack_v1.0.0.tar
 docker save os3infotech/agent-stack:v1.0.0 -o agent-stack_v1.0.0.tar
 
 
+cat << 'EOF' > onboarding-bundle/install.sh
+#!/usr/bin/env bash
+set -euo pipefail
 
-onboarding-bundle# ls
-images  onboarding-agent-0.1.1.tgz
+echo "======================================"
+echo "  Loading all container images..."
+echo "======================================"
+
+# Detect loader
+if command -v docker &> /dev/null; then
+  loader="docker load -i"
+elif command -v ctr &> /dev/null; then
+  loader="ctr image import"
+else
+  echo "ERROR: No supported container runtime found (docker/ctr)."
+  exit 1
+fi
+
+for img in ./images/*.tar; do
+  echo "Importing $img"
+  $loader "$img"
+done
+
+echo "======================================"
+echo "  Installing Helm chart..."
+echo "======================================"
+
+helm install onboarding-release ./onboarding-agent-*.tgz \
+  --namespace onboard --create-namespace \
+  --set clusterName="${CLUSTER_NAME}" \
+  --set username="${USERNAME:-admin}" \
+  --set prometheusUrl="${PROM_URL:-}" \
+  --set lokiUrl="${LOKI_URL:-}" \
+  --set backendHost="${BACKEND_HOST:-}" \
+  --set providerName="${PROVIDER_NAME:-}" \
+  --set agentId="${AGENT_ID}" \
+  --set apiKey="${API_KEY}"
+
+echo "======================================"
+echo "  Onboarding installation completed!"
+echo "======================================"
+EOF
+
+chmod +x onboarding-bundle/install.sh
 
