@@ -74,7 +74,6 @@ docker save os3infotech/monitoring-stack:v1.0.0 -o monitoring-stack_v1.0.0.tar
 docker save os3infotech/agent-stack:v1.0.0 -o agent-stack_v1.0.0.tar
 
 
-cat << 'EOF' > onboarding-bundle/install.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -82,7 +81,7 @@ echo "======================================"
 echo "  Loading all container images..."
 echo "======================================"
 
-# Detect loader
+# Detect runtime loader
 if command -v docker &> /dev/null; then
   loader="docker load -i"
 elif command -v ctr &> /dev/null; then
@@ -98,24 +97,54 @@ for img in ./images/*.tar; do
 done
 
 echo "======================================"
+echo "  Setting default environment variables"
+echo "======================================"
+
+# Provide defaults for optional variables if they are not set
+CLUSTER_NAME="${CLUSTER_NAME:-}"
+USERNAME="${USERNAME:-admin}"
+PROM_URL="${PROM_URL:-}"
+LOKI_URL="${LOKI_URL:-}"
+BACKEND_HOST="${BACKEND_HOST:-}"
+PROVIDER_NAME="${PROVIDER_NAME:-}"
+AGENT_ID="${AGENT_ID:-}"
+API_KEY="${API_KEY:-}"
+
+# Validate required variables
+if [[ -z "$CLUSTER_NAME" ]]; then
+  echo "ERROR: CLUSTER_NAME must be set (e.g., export CLUSTER_NAME=dev)"
+  exit 1
+fi
+
+if [[ -z "$AGENT_ID" ]]; then
+  echo "ERROR: AGENT_ID must be set (e.g., export AGENT_ID=xxxx)"
+  exit 1
+fi
+
+if [[ -z "$API_KEY" ]]; then
+  echo "ERROR: API_KEY must be set (e.g., export API_KEY=ks_xxx)"
+  exit 1
+fi
+
+echo "======================================"
 echo "  Installing Helm chart..."
 echo "======================================"
 
 helm install onboarding-release ./onboarding-agent-*.tgz \
   --namespace onboard --create-namespace \
-  --set clusterName="${CLUSTER_NAME}" \
-  --set username="${USERNAME:-admin}" \
-  --set prometheusUrl="${PROM_URL:-}" \
-  --set lokiUrl="${LOKI_URL:-}" \
-  --set backendHost="${BACKEND_HOST:-}" \
-  --set providerName="${PROVIDER_NAME:-}" \
-  --set agentId="${AGENT_ID}" \
-  --set apiKey="${API_KEY}"
+  --set clusterName="$CLUSTER_NAME" \
+  --set username="$USERNAME" \
+  --set prometheusUrl="$PROM_URL" \
+  --set lokiUrl="$LOKI_URL" \
+  --set backendHost="$BACKEND_HOST" \
+  --set providerName="$PROVIDER_NAME" \
+  --set agentId="$AGENT_ID" \
+  --set apiKey="$API_KEY"
 
 echo "======================================"
 echo "  Onboarding installation completed!"
 echo "======================================"
-EOF
+
 
 chmod +x onboarding-bundle/install.sh
 
