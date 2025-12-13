@@ -1,0 +1,12 @@
+dependencies:
+- name: kyverno
+  repository: https://kyverno.github.io/kyverno/
+  version: 3.2.6
+- name: kubearmor-operator
+  repository: https://kubearmor.github.io/charts
+  version: v1.6.4
+- name: node-feature-discovery
+  repository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+  version: 0.18.3
+digest: sha256:b580b9966ca17aaa494253097a8f388bce9a2536b1f8eaf07965a8b6ea737edd
+generated: "2025-12-04T11:22:35.713652789Z"

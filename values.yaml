@@ -1,0 +1,16 @@
+clusterName: ""
+username: ""
+prometheusUrl: ""
+lokiUrl: ""
+backendHost: ""
+providerName: ""
+tags: []
+agentId: ""
+apiKey: ""
+
+kubearmor:
+  enabled: true
+  config:
+    enableSecurity: true
+    enableVisibility: true
+    enablePolicy: true
