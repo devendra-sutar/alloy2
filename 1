@@ -1,1 +1,24 @@
-d
+kubectl get pods -n onboard -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -E "alloy|beyla|prometheus-config-reloader" | sort | uniq
+docker.io/grafana/alloy:v1.12.0
+docker.io/grafana/alloy:v1.3.1
+quay.io/prometheus-operator/prometheus-config-reloader:v0.81.0
+root@devendra-ws:/home/ubuntu# kubectl get pods -n onboard -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "opencost" | sort | uniq
+ghcr.io/opencost/opencost-ui:1.118.0@sha256:571f87e528ea563a5071b380df624a383968b5e20360e45dc1a2939c0024d073
+ghcr.io/opencost/opencost:1.118.0@sha256:c1a08767fe3c3b2964a75885c145bae0cba32225c0b4c1e0382a77566aef93e9
+root@devendra-ws:/home/ubuntu# kubectl get pods -n onboard -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "trivy" | sort | uniq
+mirror.gcr.io/aquasec/trivy-operator:0.29.0
+mirror.gcr.io/aquasec/trivy:0.66.0
+root@devendra-ws:/home/ubuntu# kubectl get pods -n kyverno -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "kyverno" | sort | uniq
+root@devendra-ws:/home/ubuntu# kubectl get pods -n kubearmor -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "kubearmor" | sort | uniq
+docker.io/kubearmor/kubearmor-operator:v1.6.5
+kubearmor/kubearmor-controller
+kubearmor/kubearmor-relay-server
+root@devendra-ws:/home/ubuntu# kubectl get pods -n node-feature-discovery -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "node-feature-discovery" | sort | uniq
+registry.k8s.io/nfd/node-feature-discovery:v0.17.3
+root@devendra-ws:/home/ubuntu# kubectl get pods -n onboard -l release=my-release -o=jsonpath="{.items[*].spec.containers[*].image}"
+registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0 quay.io/prometheus/node-exporter:v1.8.2root@devendra-ws:/home/ubuntu# ^C
+root@devendra-ws:/home/ubuntu# kubectl get pods -n onboard -o jsonpath="{.items[*].spec.containers[*].image}" | tr ' ' '\n' | grep -i "kyverno" | sort | uniq
+reg.kyverno.io/kyverno/background-controller:v1.16.1
+reg.kyverno.io/kyverno/cleanup-controller:v1.16.1
+reg.kyverno.io/kyverno/kyverno:v1.16.1
+reg.kyverno.io/kyverno/reports-controller:v1.16.1
