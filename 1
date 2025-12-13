@@ -24,3 +24,31 @@ docker pull quay.io/prometheus/node-exporter:v1.8.2
 
 docker pull os3infotech/monitoring-stack:v1.0.0
 docker pull os3infotech/agent-stack:v1.0.0
+
+
+docker save docker.io/grafana/alloy:v1.12.0 -o alloy_v1.12.0.tar
+docker save docker.io/grafana/alloy:v1.3.1 -o alloy_v1.3.1.tar
+docker save quay.io/prometheus-operator/prometheus-config-reloader:v0.81.0 -o prometheus-config-reloader_v0.81.0.tar
+
+docker save ghcr.io/opencost/opencost-ui:1.118.0 -o opencost-ui_1.118.0.tar
+docker save ghcr.io/opencost/opencost:1.118.0 -o opencost_1.118.0.tar
+
+docker save mirror.gcr.io/aquasec/trivy-operator:0.29.0 -o trivy-operator_0.29.0.tar
+docker save mirror.gcr.io/aquasec/trivy:0.66.0 -o trivy_0.66.0.tar
+
+docker save reg.kyverno.io/kyverno/background-controller:v1.16.1 -o kyverno-background-controller_v1.16.1.tar
+docker save reg.kyverno.io/kyverno/cleanup-controller:v1.16.1 -o kyverno-cleanup-controller_v1.16.1.tar
+docker save reg.kyverno.io/kyverno/kyverno:v1.16.1 -o kyverno_v1.16.1.tar
+docker save reg.kyverno.io/kyverno/reports-controller:v1.16.1 -o kyverno-reports-controller_v1.16.1.tar
+
+docker save docker.io/kubearmor/kubearmor-operator:v1.6.5 -o kubearmor-operator_v1.6.5.tar
+docker save docker.io/kubearmor/kubearmor-controller:v1.6.5 -o kubearmor-controller_v1.6.5.tar
+docker save docker.io/kubearmor/kubearmor-relay-server:v1.6.5 -o kubearmor-relay-server_v1.6.5.tar
+
+docker save registry.k8s.io/nfd/node-feature-discovery:v0.17.3 -o nfd_node-feature-discovery_v0.17.3.tar
+
+docker save registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0 -o kube-state-metrics_v2.13.0.tar
+docker save quay.io/prometheus/node-exporter:v1.8.2 -o node-exporter_v1.8.2.tar
+
+docker save os3infotech/monitoring-stack:v1.0.0 -o monitoring-stack_v1.0.0.tar
+docker save os3infotech/agent-stack:v1.0.0 -o agent-stack_v1.0.0.tar
