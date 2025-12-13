@@ -1,154 +1,332 @@
-tar -xzf onboarding.tgz && \
-CLUSTER_NAME="devendra" AGENT_ID="c17a7761-a4e0-4a7c-ad5d-e38fd72041b9" API_KEY="ks_AfJeBki48e9kKFWRBLiaseg7e6EyD4RB" \
-PROM_URL="http://172.16.1.107:30090" LOKI_URL="http://172.16.1.107:3100" \
-BACKEND_HOST="local.test" PROVIDER_NAME="local" USERNAME="admin" \
-bash onboarding-bundle/install.sh
+clusterName: ""
+username: ""
+prometheusUrl: ""
+lokiUrl: ""
+backendHost: ""
+providerName: ""
+tags: []
+agentId: ""
+apiKey: ""
 
-
-root@devendra-ws:/home/ubuntu/testing-bundle# tar -xzf onboarding.tgz && \
-CLUSTER_NAME="devendra" AGENT_ID="c17a7761-a4e0-4a7c-ad5d-e38fd72041b9" API_KEY="ks_AfJeBki48e9kKFWRBLiaseg7e6EyD4RB" \
-PROM_URL="http://172.16.1.107:30090" LOKI_URL="http://172.16.1.107:3100" \
-BACKEND_HOST="local.test" PROVIDER_NAME="local" USERNAME="admin" \
-bash onboarding-bundle/install.sh
-bash: onboarding-bundle/install.sh: No such file or directory
-root@devendra-ws:/home/ubuntu/testing-bundle# ls
-images  install.sh  onboarding-agent-0.1.1.tgz  onboarding.tgz
-root@devendra-ws:/home/ubuntu/testing-bundle# 
-
-
-https://github.com/OS3Infotech/KubeSage-Public/blob/main/charts/onboarding-agent-0.1.1.tgz
-tar -czvf onboarding.tgz -C onboarding-bundle .
-docker pull docker.io/grafana/alloy:v1.12.0
-docker pull docker.io/grafana/alloy:v1.3.1
-docker pull quay.io/prometheus-operator/prometheus-config-reloader:v0.81.0
-
-docker pull ghcr.io/opencost/opencost-ui:1.118.0
-docker pull ghcr.io/opencost/opencost:1.118.0
-
-docker pull mirror.gcr.io/aquasec/trivy-operator:0.29.0
-docker pull mirror.gcr.io/aquasec/trivy:0.66.0
-
-docker pull reg.kyverno.io/kyverno/background-controller:v1.16.1
-docker pull reg.kyverno.io/kyverno/cleanup-controller:v1.16.1
-docker pull reg.kyverno.io/kyverno/kyverno:v1.16.1
-docker pull reg.kyverno.io/kyverno/reports-controller:v1.16.1
-
-docker pull docker.io/kubearmor/kubearmor-operator:v1.6.5
-docker pull docker.io/kubearmor/kubearmor-controller:v1.6.5
-docker pull docker.io/kubearmor/kubearmor-relay-server:v1.6.5
-
-docker pull registry.k8s.io/nfd/node-feature-discovery:v0.17.3
-
-docker pull registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
-docker pull quay.io/prometheus/node-exporter:v1.8.2
-
-docker pull os3infotech/monitoring-stack:v1.0.0
-docker pull os3infotech/agent-stack:v1.0.0
-
-
-docker save docker.io/grafana/alloy:v1.12.0 -o alloy_v1.12.0.tar
-docker save docker.io/grafana/alloy:v1.3.1 -o alloy_v1.3.1.tar
-docker save quay.io/prometheus-operator/prometheus-config-reloader:v0.81.0 -o prometheus-config-reloader_v0.81.0.tar
-
-docker save ghcr.io/opencost/opencost-ui:1.118.0 -o opencost-ui_1.118.0.tar
-docker save ghcr.io/opencost/opencost:1.118.0 -o opencost_1.118.0.tar
-
-docker save mirror.gcr.io/aquasec/trivy-operator:0.29.0 -o trivy-operator_0.29.0.tar
-docker save mirror.gcr.io/aquasec/trivy:0.66.0 -o trivy_0.66.0.tar
-
-docker save reg.kyverno.io/kyverno/background-controller:v1.16.1 -o kyverno-background-controller_v1.16.1.tar
-docker save reg.kyverno.io/kyverno/cleanup-controller:v1.16.1 -o kyverno-cleanup-controller_v1.16.1.tar
-docker save reg.kyverno.io/kyverno/kyverno:v1.16.1 -o kyverno_v1.16.1.tar
-docker save reg.kyverno.io/kyverno/reports-controller:v1.16.1 -o kyverno-reports-controller_v1.16.1.tar
-
-docker save docker.io/kubearmor/kubearmor-operator:v1.6.5 -o kubearmor-operator_v1.6.5.tar
-docker save docker.io/kubearmor/kubearmor-controller:v1.6.5 -o kubearmor-controller_v1.6.5.tar
-docker save docker.io/kubearmor/kubearmor-relay-server:v1.6.5 -o kubearmor-relay-server_v1.6.5.tar
-
-docker save registry.k8s.io/nfd/node-feature-discovery:v0.17.3 -o nfd_node-feature-discovery_v0.17.3.tar
-
-docker save registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0 -o kube-state-metrics_v2.13.0.tar
-docker save quay.io/prometheus/node-exporter:v1.8.2 -o node-exporter_v1.8.2.tar
-
-docker save os3infotech/monitoring-stack:v1.0.0 -o monitoring-stack_v1.0.0.tar
-docker save os3infotech/agent-stack:v1.0.0 -o agent-stack_v1.0.0.tar
-
-
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "======================================"
-echo "  Loading all container images..."
-echo "======================================"
-
-# Detect which container runtime loader is available
-if command -v docker &> /dev/null; then
-  loader="docker load -i"
-elif command -v ctr &> /dev/null; then
-  loader="ctr image import"
-else
-  echo "ERROR: No supported container runtime found (docker or ctr)."
-  exit 1
-fi
-
-for img in ./images/*.tar; do
-  echo "Importing $img"
-  $loader "$img"
-done
-
-echo "======================================"
-echo "  Setting and validating environment variables"
-echo "======================================"
-
-# Load variables from environment if passed in,
-# otherwise keep them empty so we can prompt if needed.
-CLUSTER_NAME="${CLUSTER_NAME:-}"
-AGENT_ID="${AGENT_ID:-}"
-API_KEY="${API_KEY:-}"
-USERNAME="${USERNAME:-admin}"
-PROM_URL="${PROM_URL:-}"
-LOKI_URL="${LOKI_URL:-}"
-BACKEND_HOST="${BACKEND_HOST:-}"
-PROVIDER_NAME="${PROVIDER_NAME:-}"
-
-# Prompt for required variables if they are unset or empty
-if [[ -z "$CLUSTER_NAME" ]]; then
-  read -rp "Enter CLUSTER_NAME: " CLUSTER_NAME
-fi
-
-if [[ -z "$AGENT_ID" ]]; then
-  read -rp "Enter AGENT_ID: " AGENT_ID
-fi
-
-if [[ -z "$API_KEY" ]]; then
-  read -rp "Enter API_KEY: " API_KEY
-fi
-
-echo "======================================"
-echo "  Installing Helm chart..."
-echo "======================================"
-
-helm install onboarding-release ./onboarding-agent-*.tgz \
-  --namespace onboard --create-namespace \
-  --set clusterName="$CLUSTER_NAME" \
-  --set username="$USERNAME" \
-  --set prometheusUrl="$PROM_URL" \
-  --set lokiUrl="$LOKI_URL" \
-  --set backendHost="$BACKEND_HOST" \
-  --set providerName="$PROVIDER_NAME" \
-  --set agentId="$AGENT_ID" \
-  --set apiKey="$API_KEY"
-
-echo "======================================"
-echo "  Onboarding installation completed!"
-echo "======================================"
+kubearmor:
+  enabled: true
+  config:
+    enableSecurity: true
+    enableVisibility: true
+    enablePolicy: true
 
 
 
-chmod +x onboarding-bundle/install.sh
+apiVersion: v2
+appVersion: 1.16.1
+dependencies:
+- condition: kyverno.enabled
+  name: kyverno
+  repository: https://kyverno.github.io/kyverno/
+  version: 3.2.6
+- condition: kubearmor.enabled
+  name: kubearmor-operator
+  repository: https://kubearmor.github.io/charts
+  version: 1.6.4
+- condition: nfd.enabled
+  name: node-feature-discovery
+  repository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+  version: 0.18.3
+description: A Helm chart for Kubernetes
+name: onboarding-agent
+type: application
+version: 0.1.1
 
-onboarding-bundle# ls
-images  install.sh  onboarding-agent-0.1.1.tgz
-root@devendra-ws:/home/ubuntu/onboarding-bundle# tar -czvf onboarding-agent-0.1.1.tgz -C onboarding-bundle .
-tar: onboarding-bundle: Cannot open: No such file or directory
-tar: Error is not recoverable: exiting now
+
+{{/*
+Validate that required values are supplied via --set (or values file)
+*/}}
+{{- define "requiredValues" -}}
+  {{- if not .Values.clusterName -}}
+    {{- fail "clusterName is REQUIRED. Use --set clusterName=..." -}}
+  {{- end -}}
+  {{- if not .Values.username -}}
+    {{- fail "username is REQUIRED. Use --set username=..." -}}
+  {{- end -}}
+  {{- if not .Values.prometheusUrl -}}
+    {{- fail "prometheusUrl is REQUIRED. Use --set prometheusUrl=..." -}}
+  {{- end -}}
+  {{- if not .Values.lokiUrl -}}
+    {{- fail "lokiUrl is REQUIRED. Use --set lokiUrl=..." -}}
+  {{- end -}}
+  {{- if not .Values.backendHost -}}
+    {{- fail "backendHost is REQUIRED. Use --set backendHost=..." -}}
+  {{- end -}}
+  {{- if not .Values.providerName -}}
+    {{- fail "providerName is REQUIRED. Use --set providerName=..." -}}
+  {{- end -}}
+  {{- if not .Values.agentId -}}
+    {{- fail "agentId is REQUIRED. Use --set agentId=..." -}}
+  {{- end -}}
+  {{- if not .Values.apiKey -}}
+    {{- fail "apiKey is REQUIRED. Use --set apiKey=..." -}}
+  {{- end -}}
+  {{- if not .Values.tags -}}
+    {{- fail "tags is REQUIRED. Use --set tags='{prod,dev}'" -}}
+  {{- end -}}
+{{- end -}}
+
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: onboard
+
+
+apiVersion: operator.kubearmor.com/v1
+kind: KubeArmorConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: kubearmorconfig
+    app.kubernetes.io/instance: kubearmorconfig-sample
+    app.kubernetes.io/part-of: kubearmoroperator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubearmoroperator
+  name: kubearmorconfig-default
+  namespace: onboard
+spec:
+  defaultCapabilitiesPosture: audit
+  defaultFilePosture: audit
+  defaultNetworkPosture: audit
+  defaultVisibility: process,network
+  enableStdOutLogs: false
+  enableStdOutAlerts: false
+  enableStdOutMsgs: false
+  seccompEnabled: false
+  alertThrottling: true
+  maxAlertPerSec: 10
+  throttleSec: 30
+  kubearmorImage:
+    image: kubearmor/kubearmor:stable
+    imagePullPolicy: Always
+  kubearmorInitImage:
+    image: kubearmor/kubearmor-init:stable
+    imagePullPolicy: Always
+  kubearmorRelayImage:
+    image: kubearmor/kubearmor-relay-server
+    imagePullPolicy: Always
+  kubearmorControllerImage:
+    image: kubearmor/kubearmor-controller
+    imagePullPolicy: Always
+
+
+
+{{/* ======================================== */}}
+{{/* Validate required values */}}
+{{- include "requiredValues" . -}}
+{{- /* ======================================== */}}
+{{- /* 0. ServiceAccount - Onboarding */}}
+{{- /* ======================================== */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: onboarding-sa																			
+  namespace: default
+---
+{{- /* ======================================== */}}
+{{- /* 1. ClusterRoleBinding - Onboarding (cluster-admin) */}}
+{{- /* ======================================== */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onboarding-sa-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: onboarding-sa
+    namespace: default
+---
+{{- /* ======================================== */}}
+{{- /* 2. ConfigMap – Onboarding Job */}}
+{{- /* ======================================== */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: onboarding-config
+  namespace: default
+data:
+  CLUSTER_NAME: "{{ .Values.clusterName }}"
+  USERNAME: "{{ .Values.username }}"
+  PROMETHEUS_URL: "{{ .Values.prometheusUrl }}"
+  LOKI_URL: "{{ .Values.lokiUrl }}"
+  API_HOST: "{{ .Values.backendHost }}"
+---
+{{- /* ======================================== */}}
+{{- /* 3. Job – k8s-onboarding-job */}}
+{{- /* ======================================== */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8s-onboarding-job
+  namespace: default
+  labels:
+    app: onboarding
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: onboarding
+    spec:
+      serviceAccountName: onboarding-sa
+      restartPolicy: Never
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: deploy
+          image: os3infotech/monitoring-stack:v1.0.0 
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: onboarding-config
+          args:
+            - "{{ .Values.clusterName }}"
+            - "{{ .Values.username }}"
+            - "{{ .Values.prometheusUrl }}"
+            - "{{ .Values.lokiUrl }}"
+            - "{{ .Values.backendHost }}"
+---
+{{- /* ======================================== */}}
+{{- /* 4. ServiceAccount – KubeSage Agent */}}
+{{- /* ======================================== */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubesage-agent
+  namespace: default
+---
+{{- /* ======================================== */}}
+{{- /* 5. ConfigMap – Agent Env */}}
+{{- /* ======================================== */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-env
+  namespace: default
+data:
+  AGENT_ID: "{{ .Values.agentId }}"
+  API_KEY: "{{ .Values.apiKey }}"
+  CLUSTER_NAME: "{{ .Values.clusterName }}"
+  PROVIDER_NAME: "{{ .Values.providerName }}"
+  TAGS_JSON: '{{ toJson .Values.tags }}'
+  BACKEND_URL: "https://{{ .Values.backendHost }}/api/v2.0/onboard"
+  BACKEND_WS_URL: "wss://{{ .Values.backendHost }}/api/v2.0/ws"
+  PORT: "9000"
+  SKIP_TLS_VERIFY: "true"
+  DEBUG: "true"
+  LOG_LEVEL: "INFO"
+---
+{{- /* ======================================== */}}
+{{- /* 6. ClusterRole – KubeSage Agent */}}
+{{- /* ======================================== */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubesage-agent-role
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "namespaces", "pods", "services", "persistentvolumes", "configmaps", "secrets", "serviceaccounts", "events"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["*"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["*"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["*"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io", "extensions"]
+  resources: ["ingresses"]
+  verbs: ["*"]
+- apiGroups: ["kyverno.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["security.kubearmor.com"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+{{- /* ======================================== */}}
+{{- /* 7. ClusterRoleBinding – KubeSage Agent */}}
+{{- /* ======================================== */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubesage-agent-binding
+subjects:
+- kind: ServiceAccount
+  name: kubesage-agent
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: kubesage-agent-role
+  apiGroup: rbac.authorization.k8s.io
+---
+{{- /* ======================================== */}}
+{{- /* 8. Deployment – my-agent */}}
+{{- /* ======================================== */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-agent
+  namespace: default
+  labels:
+    app: my-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-agent
+  template:
+    metadata:
+      labels:
+        app: my-agent
+    spec:
+      serviceAccountName: kubesage-agent
+      tolerations:
+        - key: "node.kubernetes.io/disk-pressure"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+      - name: agent
+        image: os3infotech/agent-stack:v1.0.0 
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9000
+        envFrom:
+        - configMapRef:
+            name: agent-env
+---
+{{- /* ======================================== */}}
+{{- /* 9. Service – NodePort */}}
+{{- /* ======================================== */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-agent-svc
+  namespace: default
+spec:
+  selector:
+    app: my-agent
+  ports:
+  - protocol: TCP
+    port: 9000
+    targetPort: 9000
+    nodePort: 31245
+  type: NodePort
+
+
+
