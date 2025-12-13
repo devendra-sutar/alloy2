@@ -1,3 +1,11 @@
+tar -xzf onboarding.tgz && \
+CLUSTER_NAME="dev" AGENT_ID="c17a7761-a4e0-4a7c-ad5d-e38fd72041b9" API_KEY="ks_AfJeBki48e9kKFWRBLiaseg7e6EyD4RB" \
+PROM_URL="http://172.16.1.107:30090" LOKI_URL="http://172.16.1.107:3100" \
+BACKEND_HOST="local.test" PROVIDER_NAME="local" USERNAME="admin" \
+bash onboarding-bundle/install.sh
+
+
+
 https://github.com/OS3Infotech/KubeSage-Public/blob/main/charts/onboarding-agent-0.1.1.tgz
 tar -czvf onboarding.tgz -C onboarding-bundle .
 docker pull docker.io/grafana/alloy:v1.12.0
