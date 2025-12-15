@@ -1,1 +1,16 @@
-
+[WARN] API call failed for status: Tool Installation Started
+[INFO]  Checking required tools: kubectl, helm, envsubst, curl, awk
+[SUCCESS] Tools ready
+[#####---------------------------------------------]  10%serviceaccount/admin created
+clusterrolebinding.rbac.authorization.k8s.io/admin-cluster-admin unchanged
+[SUCCESS] ServiceAccount + ClusterRoleBinding created
+[##########----------------------------------------]  20%[SUCCESS] No conflicting namespaces
+[###############-----------------------------------]  30%[INFO]  Creating values template...
+[SUCCESS] Values template created
+[####################------------------------------]  40%[INFO]  Sending status to API: {"cluster_name":"devendra","status":"Installation In Progress..."}
+curl: (6) Could not resolve host: local.test
+[WARN] API call failed for status: Installation In Progress...
+[INFO]  Rendering values template...
+[SUCCESS] Values rendered
+[#########################-------------------------]  50%[INFO]  Deploying Kubernetes Event Exporter...
+error: unexpected EOF
