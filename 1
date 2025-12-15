@@ -345,15 +345,15 @@ config:
           eventType: "kubernetes-event"
           createdAt: "{{ .GetTimestampMs }}"
           details:
-            message: "{\"message\":\"{{ .Message }}\"}"
-            reason: "{\"reason\":\"{{ .Reason }}\"}"
-            type: "{\"type\":\"{{ .Type }}\"}"
-            count: "{\"count\":\"{{ .Count }}\"}"
-            kind: "{\"kind\":\"{{ .InvolvedObject.Kind }}\"}"
-            name: "{\"name\":\"{{ .InvolvedObject.Name }}\"}"
-            namespace: "{\"namespace\":\"{{ .Namespace }}\"}"
-            component: "{\"component\":\"{{ .Source.Component }}\"}"
-            host: "{\"host\":\"{{ .Source.Host }}\"}"
+            message: "{{ .Message }}"
+            reason: "{{ .Reason }}"
+            type: "{{ .Type }}"
+            count: "{{ .Count }}"
+            kind: "{{ .InvolvedObject.Kind }}"
+            name: "{{ .InvolvedObject.Name }}"
+            namespace: "{{ .Namespace }}"
+            component: "{{ .Source.Component }}"
+            host: "{{ .Source.Host }}"
             labels: "{{ toJson .InvolvedObject.Labels}}"
 EOF
 echo -e "${GREEN}[SUCCESS]${NC} Values template created"
@@ -409,11 +409,16 @@ if [[ "$SKIP_EVENT_EXPORTER" == "true" ]]; then
 else
   echo -e "${BLUE}[INFO]${NC} Deploying Kubernetes Event Exporter..."
   
+  # Remove the repo if it already exists to avoid conflicts
+  helm repo remove bitnami 2>/dev/null || true
+  
   attempts=3
   success=false
   for i in $(seq 1 $attempts); do
+    echo -e "${BLUE}[INFO]${NC} Adding bitnami helm repo (attempt $i/$attempts)..."
     if helm repo add bitnami https://charts.bitnami.com/bitnami; then
       success=true
+      echo -e "${GREEN}[SUCCESS]${NC} Added bitnami repo"
       break
     fi
     if [[ $i -eq $attempts ]]; then
@@ -434,8 +439,10 @@ else
   attempts=3
   success=false
   for i in $(seq 1 $attempts); do
+    echo -e "${BLUE}[INFO]${NC} Updating helm repos (attempt $i/$attempts)..."
     if helm repo update; then
       success=true
+      echo -e "${GREEN}[SUCCESS]${NC} Updated helm repos"
       break
     fi
     if [[ $i -eq $attempts ]]; then
@@ -459,12 +466,14 @@ else
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing event exporter (attempt $i/$attempts)..."
       if helm install kubernetes-event-exporter \
         bitnami/kubernetes-event-exporter \
         --create-namespace -n "$NAMESPACE" \
         -f "${OUTPUT_DIR}/values.yml" \
         --set image.repository=bitnamilegacy/kubernetes-event-exporter; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Event Exporter deployed"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -483,9 +492,6 @@ else
       echo -e "${YELLOW}[WARN]${NC} Retry ${i}/${attempts} in ${backoff}s..."
       sleep "$backoff"
     done
-    if [[ "$success" == "true" ]]; then
-      echo -e "${GREEN}[SUCCESS]${NC} Event Exporter deployed"
-    fi
   fi
 fi
 CURRENT_STEP=$((CURRENT_STEP+1))
@@ -496,18 +502,31 @@ echo -e "${BLUE}[INFO]${NC} Processing Monitoring Stack..."
 if [[ "$SKIP_MONITORING" != "true" ]]; then
   echo -e "${BLUE}[INFO]${NC} Deploying monitoring stack…"
   
-  # This command might fail if no CRDs are found, which is OK
-  kubectl get crds | grep 'monitoring.coreos.com' | awk '{print $1}' | while read -r crd; do
-    kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite || true
-    kubectl annotate crd "$crd" meta.helm.sh/release-name="my-release" --overwrite || true
-    kubectl annotate crd "$crd" meta.helm.sh/release-namespace="onboard" --overwrite || true
-  done
+  # CRD labeling - skip if no CRDs found
+  echo -e "${BLUE}[INFO]${NC} Checking for monitoring CRDs..."
+  crd_count=$(kubectl get crds 2>/dev/null | grep -c 'monitoring.coreos.com' || true)
+  if [[ $crd_count -gt 0 ]]; then
+    echo -e "${BLUE}[INFO]${NC} Found $crd_count monitoring CRDs, labeling them..."
+    kubectl get crds | grep 'monitoring.coreos.com' | awk '{print $1}' | while read -r crd; do
+      echo -e "${BLUE}[INFO]${NC} Labeling CRD: $crd"
+      kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite || echo -e "${YELLOW}[WARN]${NC} Failed to label CRD: $crd"
+      kubectl annotate crd "$crd" meta.helm.sh/release-name="my-release" --overwrite || echo -e "${YELLOW}[WARN]${NC} Failed to annotate CRD: $crd"
+      kubectl annotate crd "$crd" meta.helm.sh/release-namespace="onboard" --overwrite || echo -e "${YELLOW}[WARN]${NC} Failed to annotate CRD: $crd"
+    done
+  else
+    echo -e "${YELLOW}[WARN]${NC} No monitoring CRDs found, skipping labeling"
+  fi
+  
+  # Remove existing repo if exists
+  helm repo remove grafana 2>/dev/null || true
   
   attempts=3
   success=false
   for i in $(seq 1 $attempts); do
+    echo -e "${BLUE}[INFO]${NC} Adding grafana helm repo (attempt $i/$attempts)..."
     if helm repo add grafana https://grafana.github.io/helm-charts; then
       success=true
+      echo -e "${GREEN}[SUCCESS]${NC} Added grafana repo"
       break
     fi
     if [[ $i -eq $attempts ]]; then
@@ -528,8 +547,10 @@ if [[ "$SKIP_MONITORING" != "true" ]]; then
   attempts=3
   success=false
   for i in $(seq 1 $attempts); do
+    echo -e "${BLUE}[INFO]${NC} Updating helm repos (attempt $i/$attempts)..."
     if helm repo update; then
       success=true
+      echo -e "${GREEN}[SUCCESS]${NC} Updated helm repos"
       break
     fi
     if [[ $i -eq $attempts ]]; then
@@ -569,11 +590,20 @@ if [[ "$SKIP_MONITORING" != "true" ]]; then
   if [[ "$DRY_RUN" == "true" ]]; then
     echo -e "${YELLOW}[INFO]${NC} Dry-run: skipping install of monitoring stack"
   else
+    # Check if release already exists
+    if helm status "$RELEASE_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+      echo -e "${YELLOW}[WARN]${NC} Release '$RELEASE_NAME' already exists in namespace '$NAMESPACE'. Uninstalling..."
+      helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" || echo -e "${YELLOW}[WARN]${NC} Failed to uninstall existing release"
+      sleep 5
+    fi
+    
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing monitoring stack (attempt $i/$attempts)..."
       if helm upgrade --install "${RELEASE_NAME}" grafana/k8s-monitoring "${helm_args[@]}"; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Monitoring stack installation command executed (release=${RELEASE_NAME})"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -592,9 +622,6 @@ if [[ "$SKIP_MONITORING" != "true" ]]; then
       echo -e "${YELLOW}[WARN]${NC} Retry ${i}/${attempts} in ${backoff}s..."
       sleep "$backoff"
     done
-    if [[ "$success" == "true" ]]; then
-      echo -e "${GREEN}[SUCCESS]${NC} Monitoring stack installation command executed (release=${RELEASE_NAME})"
-    fi
   fi
 else
   echo -e "${YELLOW}[INFO]${NC} Monitoring stack skipped"
@@ -610,11 +637,18 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
   else
     echo -e "${BLUE}[INFO]${NC} Deploying cost analysis (Kepler, OpenCost, Alloy)..."
     
+    # Remove existing repos if they exist
+    helm repo remove kepler 2>/dev/null || true
+    helm repo remove opencost 2>/dev/null || true
+    helm repo remove grafana 2>/dev/null || true
+    
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Adding kepler helm repo (attempt $i/$attempts)..."
       if helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Added kepler repo"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -635,8 +669,10 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Adding opencost helm repo (attempt $i/$attempts)..."
       if helm repo add opencost https://opencost.github.io/opencost-helm-chart; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Added opencost repo"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -657,8 +693,10 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Adding grafana helm repo (attempt $i/$attempts)..."
       if helm repo add grafana https://grafana.github.io/helm-charts; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Added grafana repo"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -679,8 +717,10 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Updating helm repos (attempt $i/$attempts)..."
       if helm repo update; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Updated helm repos"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -701,8 +741,10 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing kepler (attempt $i/$attempts)..."
       if helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Kepler installed"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -723,8 +765,10 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing opencost (attempt $i/$attempts)..."
       if helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} OpenCost installed"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -742,12 +786,15 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
       sleep 2
     done
     
+    echo -e "${BLUE}[INFO]${NC} Patching opencost deployment..."
     kubectl patch deployment opencost -n "$NAMESPACE" --type='json' \
       -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]' || echo -e "${YELLOW}[WARN]${NC} Failed to patch opencost"
     
+    echo -e "${BLUE}[INFO]${NC} Setting environment variables for opencost..."
     kubectl -n "$NAMESPACE" set env deployment/opencost CUSTOM_PRICING_ENABLED=true || echo -e "${YELLOW}[WARN]${NC} Failed to set CUSTOM_PRICING_ENABLED"
     kubectl -n "$NAMESPACE" set env deployment/opencost CLOUD_COST_ENABLED=true || echo -e "${YELLOW}[WARN]${NC} Failed to set CLOUD_COST_ENABLED"
     
+    echo -e "${BLUE}[INFO]${NC} Creating alloy config..."
     cat > "${OUTPUT_DIR}/config.alloy" <<EOF
 prometheus.scrape "opencost" {
   targets = [{"__address__" = "opencost.${NAMESPACE}.svc.cluster.local:9003"}]
@@ -778,8 +825,10 @@ prometheus.remote_write "central" {
 }
 EOF
     
+    echo -e "${BLUE}[INFO]${NC} Creating alloy configmap..."
     kubectl create configmap alloy-config --namespace "$NAMESPACE" --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" --dry-run=client -o yaml | kubectl apply -f - || echo -e "${YELLOW}[WARN]${NC} Failed to create alloy configmap"
     
+    echo -e "${BLUE}[INFO]${NC} Creating values-alloy.yaml..."
     cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
 alloy:
   configMap:
@@ -791,8 +840,10 @@ EOF
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing alloy (attempt $i/$attempts)..."
       if helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Alloy installed"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -810,9 +861,7 @@ EOF
       sleep 2
     done
     
-    if [[ "$success" == "true" ]]; then
-      echo -e "${GREEN}[SUCCESS]${NC} Cost analysis deployed"
-    fi
+    echo -e "${GREEN}[SUCCESS]${NC} Cost analysis deployed"
   fi
 else
   echo -e "${YELLOW}[INFO]${NC} Skipping cost analysis"
@@ -828,11 +877,16 @@ if [[ "$SKIP_TRIVY" != "true" ]]; then
   else
     echo -e "${BLUE}[INFO]${NC} Deploying Trivy Operator..."
     
+    # Remove existing repo if exists
+    helm repo remove aquasecurity 2>/dev/null || true
+    
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Adding aquasecurity helm repo (attempt $i/$attempts)..."
       if helm repo add aquasecurity https://aquasecurity.github.io/helm-charts; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Added aquasecurity repo"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -853,8 +907,10 @@ if [[ "$SKIP_TRIVY" != "true" ]]; then
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Updating helm repos (attempt $i/$attempts)..."
       if helm repo update; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Updated helm repos"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -872,6 +928,7 @@ if [[ "$SKIP_TRIVY" != "true" ]]; then
       sleep 2
     done
     
+    echo -e "${BLUE}[INFO]${NC} Creating trivy values file..."
     cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
 operator:
   metricsVulnIdEnabled: true
@@ -886,8 +943,10 @@ EOF
     attempts=3
     success=false
     for i in $(seq 1 $attempts); do
+      echo -e "${BLUE}[INFO]${NC} Installing trivy-operator (attempt $i/$attempts)..."
       if helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"; then
         success=true
+        echo -e "${GREEN}[SUCCESS]${NC} Trivy Operator installed"
         break
       fi
       if [[ $i -eq $attempts ]]; then
@@ -905,9 +964,7 @@ EOF
       sleep 2
     done
     
-    if [[ "$success" == "true" ]]; then
-      echo -e "${GREEN}[SUCCESS]${NC} Trivy Operator deployed"
-    fi
+    echo -e "${GREEN}[SUCCESS]${NC} Trivy Operator deployed"
   fi
 else
   echo -e "${YELLOW}[INFO]${NC} Skipping Trivy Operator"
