@@ -1,14 +1,548 @@
- kubectl logs k8s-onboarding-job-rtml7  --follow
-[INFO] FULL API ENDPOINT: https://172.16.1.188:8006/api/v2.0/status/update/
-[INFO] Checking /tmp writability...
-[SUCCESS] /tmp is writable
-[SUCCESS] KUBECONFIG accessible
-[INFO] Sending initial status to API...
-{"message":"status updated","cluster_name":"cluster-1","status":"Tool Installation Started","storage":"redis","processing_time_ms":0.8}[INFO] Adding required helm repositories...
+#!/usr/bin/env bash
+# Robust Kubernetes Deployment Script
+# – Improved reliability with retries & exponential backoff
+# – Better error handling and logging
+# – ALL API calls use POST (NO GET)
+set -euo pipefail
+
+### Configuration Variables
+NAMESPACE="onboard"
+OUTPUT_DIR="/tmp"
+VALUES_TEMPLATE="values-template.yaml"
+DEFAULT_OS_USERNAME="default-user"
+DEFAULT_OS_PASSWORD="default-password"
+DEFAULT_OS_HOST="https://10.0.33.244:9200"
+DEFAULT_PROMETHEUS_HOST="http://10.0.2.13:9090"
+DEFAULT_LOKI_HOST="http://10.0.2.13:3100"
+DEFAULT_TEMPO_HOST=""
+DEFAULT_API_HOST="10.0.32.106:8006"  # ← ONLY host:port
+
+### Colors
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+
+### Logging
+log_info()   { echo -e "${BLUE}[INFO]${NC}  $*"; }
+log_warn()   { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error()  { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log_success(){ echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+### Progress bar
+TOTAL_STEPS=10
+CURRENT_STEP=0
+show_progress(){
+  local percent=$(( CURRENT_STEP * 100 / TOTAL_STEPS ))
+  local bar_width=50
+  local filled=$(( percent * bar_width / 100 ))
+  local empty=$(( bar_width - filled ))
+  printf "\r["
+  printf "%0.s#" $(seq 1 $filled)
+  printf "%0.s-" $(seq 1 $empty)
+  printf "] %3d%%" "$percent"
+  if [ "$CURRENT_STEP" -eq "$TOTAL_STEPS" ]; then
+    echo
+  fi
+}
+
+### Send status update to API (POST ONLY, NON-BLOCKING)
+send_status(){
+  local status_msg="$1"
+  local payload
+  payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${status_msg}\"}"
+
+  if [[ -z "${API_URL:-}" ]]; then
+    log_warn "API_URL not set — skipping status update: ${status_msg}"
+    return 0
+  fi
+
+  log_info "Sending status to API: ${payload}"
+  curl -k --silent --show-error --fail \
+       -H "Content-Type: application/json" \
+       -d "${payload}" \
+       "${API_URL}" \
+    || log_warn "API call failed for status: ${status_msg}"
+}
+
+### Utilities
+retry_cmd(){
+  local attempts="${1:-3}"; shift
+  local sleep_seconds="${1:-2}"; shift
+  local i=0
+  until "$@"; do
+    i=$(( i + 1 ))
+    if [ "$i" -ge "$attempts" ]; then
+      log_error "Command failed after ${attempts} attempts: $*"
+      return 1
+    fi
+    local backoff=$(( sleep_seconds * (2 ** (i - 1)) ))
+    log_warn "Retry ${i}/${attempts} in ${backoff}s..."
+    sleep "$backoff"
+  done
+  return 0
+}
+
+### Usage
+show_usage(){
+  cat <<EOF
+Usage: $0 <CLUSTER_NAME> [USERNAME] [PROMETHEUS_URL] [LOKI_URL] [API_HOST] [OPTIONS]
+Required:
+  CLUSTER_NAME     Cluster identifier
+Optional Positional:
+  USERNAME         (default: \$K8S_USERNAME or admin-user)
+  PROMETHEUS_URL   (default: $DEFAULT_PROMETHEUS_HOST)
+  LOKI_URL         (default: $DEFAULT_LOKI_HOST)
+  API_HOST         (default: $DEFAULT_API_HOST) → e.g., 10.0.32.126:8006
+                                   Full URL becomes: https://API_HOST/api/v2.0/status/update/
+Named Options:
+  --os-username USER --os-password PASS --os-host URL
+  -n/--namespace NS --values-template FILE
+  --skip-event-exporter --skip-monitoring --skip-cost-analysis
+  --skip-trivy --skip-kyverno --skip-kubearmor
+  --dry-run -h|--help
+Example:
+  $0 kube-cluster admin http://10.0.32.103:9090 http://10.0.32.103:3100 10.0.32.126:8006 --skip-trivy
+EOF
+  exit 0
+}
+
+### Parse positional arguments first
+CLUSTER_NAME="${1:-}"; shift || true
+USERNAME="${1:-${K8S_USERNAME:-admin-user}}"; shift || true
+PROMETHEUS_HOST="${1:-$DEFAULT_PROMETHEUS_HOST}"; shift || true
+LOKI_HOST="${1:-$DEFAULT_LOKI_HOST}"; shift || true
+API_HOST="${1:-$DEFAULT_API_HOST}"; shift || true
+
+### Parse named options
+DRY_RUN=false
+SKIP_EVENT_EXPORTER=false
+SKIP_MONITORING=false
+SKIP_COST_ANALYSIS=false
+SKIP_TRIVY=false
+SKIP_KYVERNO=false
+SKIP_KUBEARMOR=false
+OS_USERNAME="$DEFAULT_OS_USERNAME"
+OS_PASSWORD="$DEFAULT_OS_PASSWORD"
+OS_HOST="$DEFAULT_OS_HOST"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --username)       USERNAME="${2:-}";         shift 2;;
+    --os-username)    OS_USERNAME="${2:-}";       shift 2;;
+    --os-password)    OS_PASSWORD="${2:-}";       shift 2;;
+    --os-host)        OS_HOST="${2:-}";           shift 2;;
+    -n|--namespace)   NAMESPACE="${2:-$NAMESPACE}"; shift 2;;
+    --values-template)VALUES_TEMPLATE="${2:-$VALUES_TEMPLATE}"; shift 2;;
+    --skip-event-exporter)   SKIP_EVENT_EXPORTER=true;   shift;;
+    --skip-monitoring)       SKIP_MONITORING=true;       shift;;
+    --skip-cost-analysis)    SKIP_COST_ANALYSIS=true;    shift;;
+    --skip-trivy)            SKIP_TRIVY=true;            shift;;
+    --skip-kyverno)          SKIP_KYVERNO=true;          shift;;
+    --skip-kubearmor)        SKIP_KUBEARMOR=true;        shift;;
+    --dry-run)               DRY_RUN=true;               shift;;
+    -h|--help)               show_usage;;
+    *) log_error "Unknown argument: $1"; show_usage;;
+  esac
+done
+
+### Override with environment variables if set
+PROMETHEUS_HOST="${PROMETHEUS_URL:-$PROMETHEUS_HOST}"
+LOKI_HOST="${LOKI_URL:-$LOKI_HOST}"
+TEMPO_HOST="${TEMPO_HOST:-$DEFAULT_TEMPO_HOST}"
+
+### Default API path (change if you want v1 or other path)
+API_PATH="${API_PATH:-/api/v2.0/status/update/}"
+
+### Helpers for validation
+_is_host_or_hostport() {
+  [[ "$1" =~ ^[0-9A-Za-z.-]+(:[0-9]+)?$ ]]
+}
+_is_url() {
+  [[ "$1" =~ ^https?:// ]]
+}
+
+### Build/normalize API_HOST -> API_URL
+if [[ -z "${API_HOST:-}" ]]; then
+  unset API_URL
+else
+  if _is_url "$API_HOST"; then
+    # API_HOST is a URL. If it contains a path keep it; otherwise append API_PATH
+    if [[ "$API_HOST" =~ ^https?://[^/]+/.+ ]]; then
+      API_URL="${API_HOST%/}/"    # preserve provided path, ensure single trailing slash
+    else
+      API_URL="${API_HOST%/}${API_PATH}"
+    fi
+  else
+    # plain host or host:port -> assume https and append API_PATH
+    if _is_host_or_hostport "$API_HOST"; then
+      API_URL="https://${API_HOST%/}${API_PATH}"
+    else
+      log_error "API_HOST must be hostname, host:port, ip, or http(s)://... (got: $API_HOST)"
+      send_status "Installation Failed" || true
+      exit 1
+    fi
+  fi
+fi
+
+log_info "FULL API ENDPOINT: ${API_URL:-<not-set>}"
+
+### Validate required
+if [[ -z "${CLUSTER_NAME:-}" ]]; then
+  log_error "CLUSTER_NAME is required"
+  exit 1
+fi
+
+### Validate other hosts (PROMETHEUS_HOST, LOKI_HOST, TEMPO_HOST)
+# Accept: http(s)://..., plain hostname, hostname:port, IP, IP:port
+validate_host_or_url() {
+  local name="$1"; local value="$2"
+  [[ -z "$value" ]] && return 0
+
+  if _is_url "$value"; then
+    return 0
+  fi
+  if _is_host_or_hostport "$value"; then
+    return 0
+  fi
+
+  return 1
+}
+
+for var in PROMETHEUS_HOST LOKI_HOST TEMPO_HOST; do
+  val="${!var:-}"
+  if ! validate_host_or_url "$var" "$val"; then
+    log_error "$var must be a hostname, host:port, ip(:port) or http(s)://... (got: $val)"
+    send_status "Installation Failed" || true
+    exit 1
+  fi
+done
+
+# Final sanity-check for API_URL (if we require status updates)
+if [[ -n "${API_URL:-}" ]]; then
+  if ! _is_url "$API_URL"; then
+    log_error "Normalized API_URL does not start with http:// or https:// (got: $API_URL)"
+    send_status "Installation Failed" || true
+    exit 1
+  fi
+else
+  log_warn "API_URL not set — status updates will be skipped."
+fi
+
+### ... rest of your script continues below ...
+# (Place deployment logic, Helm installs, etc. here)
 
 
+### Sanitize SA name
+SA_NAME=$( echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/^-*//;s/-*$//' )
+if ! [[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; then
+  log_error "Invalid SA name: '$SA_NAME'"
+  send_status "Installation Failed"
+  exit 1
+fi
+
+### Check output dir
+log_info "Checking ${OUTPUT_DIR} writability..."
+if touch "${OUTPUT_DIR}/test-write" 2>/dev/null && rm -f "${OUTPUT_DIR}/test-write"; then
+  log_success "${OUTPUT_DIR} is writable"
+else
+  log_error "${OUTPUT_DIR} not writable"
+  send_status "Installation Failed"
+  exit 1
+fi
+
+### KUBECONFIG check
+if [[ -n "${KUBECONFIG:-}" ]]; then
+  if [[ ! -f "$KUBECONFIG" ]]; then
+    log_error "KUBECONFIG not found: $KUBECONFIG"
+    send_status "Installation Failed"
+    exit 1
+  fi
+  if [[ ! -r "$KUBECONFIG" ]]; then
+    log_error "KUBECONFIG not readable"
+    send_status "Installation Failed"
+    exit 1
+  fi
+fi
+log_success "KUBECONFIG accessible"
+
+### Send initial status
+send_status "Tool Installation Started"
+
+### Step 1: Prereqs
+log_info "Checking required tools: kubectl, helm, envsubst, curl, awk"
+for tool in kubectl helm envsubst curl awk; do
+  if ! command -v "$tool" >/dev/null; then
+    log_error "Missing tool: $tool"
+    send_status "Installation Failed"
+    exit 1
+  fi
+done
+log_success "Tools ready"
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 2: ServiceAccount + ClusterRoleBinding
+kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE" >/dev/null 2>&1
+retry_cmd 3 2 kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${SA_NAME}-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+EOF
+log_success "ServiceAccount + ClusterRoleBinding created"
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 3: Namespace conflict check
+for ns in alloy kubesage-security kyverno node-feature-discovery kubearmor; do
+  if kubectl get ns "$ns" >/dev/null 2>&1; then
+    log_error "Namespace '$ns' exists. Cannot proceed."
+    send_status "Installation Failed"
+    exit 1
+  fi
+done
+log_success "No conflicting namespaces"
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 4: Values template
+log_info "Creating values template..."
+cat > "${OUTPUT_DIR}/${VALUES_TEMPLATE}" <<'EOF'
+config:
+  logLevel: error
+  logFormat: json
+  route:
+    routes:
+      - match:
+        - receiver: "dump"
+        drop:
+        - namespace: "event-exporter"
+        - type: "Normal"
+  receivers:
+    - name: "dump"
+      opensearch:
+        hosts:
+          - "${OS_HOST}"
+        index: "kube-events"
+        indexFormat: "kube-events"
+        username: "${OS_USERNAME}"
+        password: "${OS_PASSWORD}"
+        useEventID: true
+        deDot: true
+        tls:
+          insecureSkipVerify: true
+        layout:
+          eventType: "kubernetes-event"
+          createdAt: "{{ .GetTimestampMs }}"
+          details:
+            message: "{{ .Message }}"
+            reason: "{{ .Reason }}"
+            type: "{{ .Type }}"
+            count: "{{ .Count }}"
+            kind: "{{ .InvolvedObject.Kind }}"
+            name: "{{ .InvolvedObject.Name }}"
+            namespace: "{{ .Namespace }}"
+            component: "{{ .Source.Component }}"
+            host: "{{ .Source.Host }}"
+            labels: "{{ toJson .InvolvedObject.Labels}}"
+EOF
+log_success "Values template created"
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+send_status "Installation In Progress..."
+### Step 5: Render values
+log_info "Rendering values template..."
+export OS_USERNAME OS_PASSWORD OS_HOST CLUSTER_NAME SA_NAME
+envsubst < "${OUTPUT_DIR}/${VALUES_TEMPLATE}" > "${OUTPUT_DIR}/values.yml" || {
+  log_error "envsubst failed"
+  send_status "Installation Failed"
+  exit 1
+}
+if [[ ! -s "${OUTPUT_DIR}/values.yml" ]]; then
+  log_error "Rendered values.yml is empty"
+  send_status "Installation Failed"
+  exit 1
+fi
+log_success "Values rendered"
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 6: Event Exporter
+deploy_event_exporter(){
+  if [[ "$SKIP_EVENT_EXPORTER" == "true" ]]; then
+    log_warn "Skipping event exporter"
+    return 0
+  fi
+  log_info "Deploying Kubernetes Event Exporter..."
+  retry_cmd 3 2 helm repo add bitnami https://charts.bitnami.com/bitnami
+  retry_cmd 3 2 helm repo update
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log_info "Dry-run: skipping install of event exporter"
+    return 0
+  fi
+  retry_cmd 3 2 helm install kubernetes-event-exporter \
+    bitnami/kubernetes-event-exporter \
+    --create-namespace -n "$NAMESPACE" \
+    -f "${OUTPUT_DIR}/values.yml" \ 
+    --set image.repository=bitnamilegacy/kubernetes-event-exporter
+  log_success "Event Exporter deployed"
+}
+deploy_event_exporter
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
 
 
+### Step 7: Monitoring Stack
+if [[ "$SKIP_MONITORING" != "true" ]]; then
+  log_info "Deploying monitoring stack…"
+  kubectl get crds | grep 'monitoring.coreos.com' | awk '{print $1}' | xargs -I {} sh -c 'kubectl label crd {} app.kubernetes.io/managed-by=Helm --overwrite && kubectl annotate crd {} meta.helm.sh/release-name="my-release" --overwrite && kubectl annotate crd {} meta.helm.sh/release-namespace="onboard" --overwrite'
+  retry_cmd 3 2 helm repo add grafana https://grafana.github.io/helm-charts
+  retry_cmd 3 2 helm repo update
+
+  RELEASE_NAME="my-release"   # fixed release name
+  # Remove full CRD delete to avoid affecting other stacks
+  # For each CRD having old ownership metadata, do:
 
 
+  helm_args=(
+    --version 1.5.1
+    -n "$NAMESPACE" --create-namespace
+    --set opencost.enabled=false
+    --set cluster.name="$CLUSTER_NAME"
+    --set externalServices.prometheus.host="$PROMETHEUS_HOST"
+    --set externalServices.prometheus.writeEndpoint=/api/v1/write
+    --set externalServices.prometheus.externalLabels.username="$SA_NAME"
+    --set externalServices.loki.host="$LOKI_HOST"
+    --set grafana.enabled=true
+  )
+  [[ -n "$TEMPO_HOST" ]] && helm_args+=( --set externalServices.tempo.host="$TEMPO_HOST" )
 
+  log_info "Installing helm chart: grafana/k8s-monitoring (release=${RELEASE_NAME})"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log_info "Dry-run: skipping install of monitoring stack"
+  else
+    if ! retry_cmd 3 2 helm upgrade --install "${RELEASE_NAME}" grafana/k8s-monitoring "${helm_args[@]}"; then
+      log_error "Monitoring stack installation failed"
+      send_status "Installation Failed"
+      exit 1
+    fi
+    log_success "Monitoring stack installation command executed (release=${RELEASE_NAME})"
+  fi
+
+else
+  log_info "Monitoring stack skipped"
+fi
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 8: Cost Analysis
+if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log_info "Dry-run: skipping cost analysis"
+  else
+    log_info "Deploying cost analysis (Kepler, OpenCost, Alloy)..."
+    retry_cmd 3 2 helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
+    retry_cmd 3 2 helm repo add opencost https://opencost.github.io/opencost-helm-chart
+    retry_cmd 3 2 helm repo add grafana https://grafana.github.io/helm-charts
+    retry_cmd 3 2 helm repo update
+
+    retry_cmd 3 2 helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"
+    retry_cmd 3 2 helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"
+    retry_cmd 3 2 kubectl patch deployment opencost -n "$NAMESPACE" --type='json' \
+      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]'
+    kubectl -n onboard set env deployment/opencost CUSTOM_PRICING_ENABLED=true 
+    kubectl -n onboard set env deployment/opencost CLOUD_COST_ENABLED=true
+    cat > "${OUTPUT_DIR}/config.alloy" <<EOF
+prometheus.scrape "opencost" {
+  targets = [{"__address__" = "opencost.${NAMESPACE}.svc.cluster.local:9003"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "kepler" {
+  targets = [{"__address__" = "kepler.${NAMESPACE}.svc.cluster.local:9102"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "trivy_operator" {
+  targets = [{"__address__" = "trivy-operator.${NAMESPACE}.svc.cluster.local:80"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.remote_write "central" {
+  endpoint {
+    url = "${PROMETHEUS_HOST}/api/v1/write"
+    tls_config {
+      insecure_skip_verify = true
+    }
+  }
+  external_labels = { cluster = "${CLUSTER_NAME}", username = "${SA_NAME}" }
+}
+EOF
+
+    kubectl create configmap alloy-config --namespace "$NAMESPACE" --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" --dry-run=client -o yaml | kubectl apply -f -
+    cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
+alloy:
+  configMap:
+    create: false
+    name: alloy-config
+    key: config.alloy
+EOF
+    retry_cmd 3 2 helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"
+    log_success "Cost analysis deployed"
+  fi
+else
+  log_info "Skipping cost analysis"
+fi
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 9: Trivy Operator
+if [[ "$SKIP_TRIVY" != "true" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log_info "Dry-run: skipping Trivy Operator"
+  else
+    log_info "Deploying Trivy Operator..."
+    retry_cmd 3 2 helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
+    retry_cmd 3 2 helm repo update
+    cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
+operator:
+  metricsVulnIdEnabled: true
+serviceMonitor:
+  enabled: true
+trivy:
+  ignoreUnfixed: true
+service:
+  headless: false
+EOF
+    retry_cmd 3 2 helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"
+    log_success "Trivy Operator deployed"
+  fi
+else
+  log_info "Skipping Trivy Operator"
+fi
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Step 10: Metrics Server
+if [[ "$DRY_RUN" != "true" ]]; then
+  log_info "Deploying Metrics Server..."
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  kubectl patch deployment metrics-server -n kube-system --type='json' \
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+  log_success "Metrics Server applied"
+else
+  log_info "Dry-run: skipping Metrics Server"
+fi
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+
+### Final status
+send_status "Cluster Onboarded Successfully"
+log_success "Onboarding Completed Successfully!"
+exit 0
