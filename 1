@@ -391,56 +391,129 @@ deploy_event_exporter(){
   retry_cmd 3 2 helm install kubernetes-event-exporter \
     bitnami/kubernetes-event-exporter \
     --create-namespace -n "$NAMESPACE" \
-    -f "${OUTPUT_DIR}/values.yml" \ 
-    --set image.repository=bitnamilegacy/kubernetes-event-exporter
+    -f "${OUTPUT_DIR}/values.yml" --set image.repository=bitnamilegacy/kubernetes-event-exporter 
   log_success "Event Exporter deployed"
 }
 deploy_event_exporter
 CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
 
 
-### Step 7: Monitoring Stack
+### Step 7: Monitoring Stack — CRD check / adopt existing CRDs & install
+
+### Step 7: Monitoring Stack — CRD check / adopt or reinstall CRDs + install monitoring
+
 if [[ "$SKIP_MONITORING" != "true" ]]; then
   log_info "Deploying monitoring stack…"
-  kubectl get crds | grep 'monitoring.coreos.com' | awk '{print $1}' | xargs -I {} sh -c 'kubectl label crd {} app.kubernetes.io/managed-by=Helm --overwrite && kubectl annotate crd {} meta.helm.sh/release-name="my-release" --overwrite && kubectl annotate crd {} meta.helm.sh/release-namespace="onboard" --overwrite'
+
   retry_cmd 3 2 helm repo add grafana https://grafana.github.io/helm-charts
   retry_cmd 3 2 helm repo update
 
-  RELEASE_NAME="my-release"   # fixed release name
-  # Remove full CRD delete to avoid affecting other stacks
-  # For each CRD having old ownership metadata, do:
+  RELEASE_NAME="my-release"
+  TARGET_NS="$NAMESPACE"
 
-
-  helm_args=(
-    --version 1.5.1
-    -n "$NAMESPACE" --create-namespace
-    --set opencost.enabled=false
-    --set cluster.name="$CLUSTER_NAME"
-    --set externalServices.prometheus.host="$PROMETHEUS_HOST"
-    --set externalServices.prometheus.writeEndpoint=/api/v1/write
-    --set externalServices.prometheus.externalLabels.username="$SA_NAME"
-    --set externalServices.loki.host="$LOKI_HOST"
-    --set grafana.enabled=true
+  # full list of CRDs that monitoring uses (update if chart changes)
+  CRD_LIST=(
+    servicemonitors.monitoring.coreos.com
+    prometheuses.monitoring.coreos.com
+    alertmanagers.monitoring.coreos.com
+    prometheusrules.monitoring.coreos.com
+    podmonitors.monitoring.coreos.com
+    probes.monitoring.coreos.com
+    thanosrulers.monitoring.coreos.com
+    alertmanagerconfigs.monitoring.coreos.com
+    prometheusagents.monitoring.coreos.com
+    scrapeconfigs.monitoring.coreos.com
+    # < add more if the chart defines additional CRDs >
   )
-  [[ -n "$TEMPO_HOST" ]] && helm_args+=( --set externalServices.tempo.host="$TEMPO_HOST" )
 
-  log_info "Installing helm chart: grafana/k8s-monitoring (release=${RELEASE_NAME})"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    log_info "Dry-run: skipping install of monitoring stack"
-  else
-    if ! retry_cmd 3 2 helm upgrade --install "${RELEASE_NAME}" grafana/k8s-monitoring "${helm_args[@]}"; then
-      log_error "Monitoring stack installation failed"
-      send_status "Installation Failed"
-      exit 1
+  missing_crd=false
+  need_patch=false
+
+  for crd in "${CRD_LIST[@]}"; do
+    if ! kubectl get crd "$crd" &>/dev/null; then
+      log_warn "CRD missing: $crd"
+      missing_crd=true
+    else
+      # check for Helm metadata
+      managed_by=$(kubectl get crd "$crd" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
+      ann_name=$(kubectl get crd "$crd" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || echo "")
+      ann_ns=$(kubectl get crd "$crd" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null || echo "")
+      if [[ "$managed_by" != "Helm" || "$ann_name" != "$RELEASE_NAME" || "$ann_ns" != "$TARGET_NS" ]]; then
+        log_warn "CRD $crd exists but lacks Helm ownership metadata — will patch"
+        need_patch=true
+      else
+        log_info "CRD $crd exists and already owned by Helm"
+      fi
     fi
-    log_success "Monitoring stack installation command executed (release=${RELEASE_NAME})"
+  done
+
+  if [[ "$missing_crd" = true ]]; then
+    log_info "Some CRDs missing — installing CRDs first"
+    helm install monitoring-crds grafana/k8s-monitoring \
+         -n "$TARGET_NS" --create-namespace \
+         --skip-crds=false \
+         --set cluster.name="$CLUSTER_NAME" \
+         --set grafana.enabled=false \
+         --set prometheus.enabled=false \
+         --set alertmanager.enabled=false \
+         --timeout 300s || {
+      log_warn "CRD install attempt failed (maybe CRDs already exist) — continuing"
+    }
+
+    for i in {1..10}; do
+      all_exist=true
+      for crd in "${CRD_LIST[@]}"; do
+        if ! kubectl get crd "$crd" &>/dev/null; then
+          all_exist=false
+          break
+        fi
+      done
+      if $all_exist; then
+        log_info "All required CRDs registered"
+        break
+      fi
+      log_info "Waiting for CRD registration ($i/10)..."
+      sleep 3
+    done
   fi
+
+  if [[ "$need_patch" = true ]]; then
+    log_info "Patching existing CRDs to add Helm metadata"
+    for crd in "${CRD_LIST[@]}"; do
+      if kubectl get crd "$crd" &>/dev/null; then
+        kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
+        kubectl annotate crd "$crd" meta.helm.sh/release-name="$RELEASE_NAME" --overwrite
+        kubectl annotate crd "$crd" meta.helm.sh/release-namespace="$TARGET_NS" --overwrite
+        log_info "Patched CRD: $crd"
+      fi
+    done
+  fi
+
+  log_info "Installing helm chart: grafana/k8s-monitoring (release=${RELEASE_NAME}) with CRDs skipped"
+  if ! retry_cmd 3 2 helm upgrade --install "$RELEASE_NAME" grafana/k8s-monitoring \
+         --version 1.5.1 \
+         -n "$TARGET_NS" --create-namespace \
+         --skip-crds \
+         --set opencost.enabled=false \
+         --set cluster.name="$CLUSTER_NAME" \
+         --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
+         --set externalServices.prometheus.writeEndpoint=/api/v1/write \
+         --set externalServices.prometheus.externalLabels.username="$SA_NAME" \
+         --set externalServices.loki.host="$LOKI_HOST" \
+         --set grafana.enabled=true; then
+    log_error "Monitoring stack installation failed — final attempt"
+    send_status "Installation Failed"
+    exit 1
+  fi
+
+  log_success "Monitoring stack deployed (release=${RELEASE_NAME})"
 
 else
   log_info "Monitoring stack skipped"
 fi
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
 
+
+CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
 ### Step 8: Cost Analysis
 if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
   if [[ "$DRY_RUN" == "true" ]]; then
