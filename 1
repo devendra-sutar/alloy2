@@ -1,5 +1,10 @@
-helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
-helm repo add opencost https://opencost.github.io/opencost-helm-chart
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
-helm repo add bitnami https://charts.bitnami.com/bitnami
+### Add all required helm repos at the beginning
+echo -e "${BLUE}[INFO]${NC} Adding required helm repositories..."
+helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart || echo -e "${YELLOW}[WARN]${NC} Failed to add kepler repo, will try again later"
+helm repo add opencost https://opencost.github.io/opencost-helm-chart || echo -e "${YELLOW}[WARN]${NC} Failed to add opencost repo, will try again later"
+helm repo add grafana https://grafana.github.io/helm-charts || echo -e "${YELLOW}[WARN]${NC} Failed to add grafana repo, will try again later"
+helm repo add aquasecurity https://aquasecurity.github.io/helm-charts || echo -e "${YELLOW}[WARN]${NC} Failed to add aquasecurity repo, will try again later"
+helm repo add bitnami https://charts.bitnami.com/bitnami || echo -e "${YELLOW}[WARN]${NC} Failed to add bitnami repo, will try again later"
+
+echo -e "${BLUE}[INFO]${NC} Updating helm repositories..."
+helm repo update || echo -e "${YELLOW}[WARN]${NC} Failed to update helm repos, will try again later"
