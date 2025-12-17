@@ -1,1 +1,12 @@
-helm install my-release oci://registry-1.docker.io/bitnamicharts/kubernetes-event-exporter
+UTPUT_DIR      = /tmp
+VALUES_TEMPLATE = values-template.yaml
+================================
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Tool Installation Started","storage":"redis","processing_time_ms":1.23}Creating values template...
+Template written to /tmp/values-template.yaml
+Rendering values.yml...
+Created /tmp/values.yml
+Rendering event-exporter.yaml...
+Created /tmp/event-exporter.yaml
+Done rendering templates.
+Error: looks like "https://charts.bitnami.com/bitnami" is not a valid chart repository or cannot be reached: Get "https://charts.bitnami.com/bitnami/index.yaml": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
