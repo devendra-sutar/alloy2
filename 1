@@ -1,1 +1,49 @@
-s
+### ================================
+### Ensure Prometheus CRDs Exist
+### ================================
+CRD_LIST=(
+  servicemonitors.monitoring.coreos.com
+  prometheuses.monitoring.coreos.com
+  alertmanagers.monitoring.coreos.com
+  prometheusrules.monitoring.coreos.com
+  podmonitors.monitoring.coreos.com
+  probes.monitoring.coreos.com
+  thanosrulers.monitoring.coreos.com
+  alertmanagerconfigs.monitoring.coreos.com
+  prometheusagents.monitoring.coreos.com
+  scrapeconfigs.monitoring.coreos.com
+)
+
+echo "[INFO] Checking required Prometheus CRDs..."
+missing_crd=false
+for crd in "${CRD_LIST[@]}"; do
+  if ! kubectl get crd "$crd" >/dev/null 2>&1; then
+    echo "[WARN] CRD missing: $crd"
+    missing_crd=true
+  fi
+done
+
+if $missing_crd; then
+  echo "[WARN] Some Prometheus CRDs are missing. You may need to install them manually before monitoring stack installation."
+else
+  echo "[INFO] All required CRDs appear to be present."
+fi
+
+### ================================
+### Install/Upgrade Monitoring Stack (skip CRDs)
+### ================================
+if ! retry_helm helm upgrade --install my-release grafana/k8s-monitoring \
+       --version 1.5.1 \
+       -n "$NAMESPACE" --create-namespace \
+       --skip-crds \
+       --set opencost.enabled=false \
+       --set cluster.name="$CLUSTER_NAME" \
+       --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
+       --set externalServices.prometheus.writeEndpoint=/api/v1/write \
+       --set externalServices.loki.host="$LOKI_HOST"; then
+  STATUS_MSG="Installation Failed"
+  echo "[ERROR] k8s-monitoring install failed after retries"
+  # Optional: send_status here
+else
+  echo "[INFO] k8s-monitoring successfully installed (CRDs skipped)."
+fi
