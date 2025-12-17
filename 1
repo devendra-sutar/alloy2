@@ -1,3 +1,1 @@
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-helm install event-exporter bitnami/kubernetes-event-exporter -n "$NAMESPACE" -f "/tmp/values.yml"
+if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then kubectl create namespace "$NAMESPACE"; fi
