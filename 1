@@ -1,1 +1,10 @@
-bash deploy.sh "mycluster" "alice" "http://172.16.1.107:30090" "http://172.16.1.107:30091" "10.0.33.244:9200"
+===== VARIABLES CONFIRMED =====
+CLUSTER_NAME    = mycluster
+USERNAME        = alice
+OS_USERNAME     = default-user
+OS_PASSWORD     = default-password
+OS_HOST         = https://10.0.33.244:9200
+PROMETHEUS_HOST = http://172.16.1.107:30090
+LOKI_HOST       = http://172.16.1.107:30091
+API_HOST        = 
+test.sh: line 71: API_URL: unbound variable
