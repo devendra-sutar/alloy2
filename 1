@@ -1,88 +1,13 @@
-bash test.sh "mycluster" "alice" "http://172.16.1.107:30090" "http://172.16.1.107:30091" "172.16.1.188:8006"
-===== VARIABLES CONFIRMED =====
-CLUSTER_NAME    = mycluster
-USERNAME        = alice
-OS_USERNAME     = default-user
-OS_PASSWORD     = default-password
-PROMETHEUS_HOST = http://172.16.1.107:30090
-LOKI_HOST       = http://172.16.1.107:30091
-API_HOST        = 172.16.1.188:8006
-API_URL         = https://172.16.1.188:8006/api/v2.0/status/update/
-NAMESPACE       = onboard
-================================
-test.sh: line 62: STATUS_MSG: unbound variable
-root@devendra-ws:/home/ubuntu# cat test.sh 
-#!/usr/bin/env bash
-set -euo pipefail
-
-### ===================
-### Positional args
-### ===================
-CLUSTER_NAME="${1:-}"; shift || true
-USERNAME="${1:-${K8S_USERNAME:-admin-user}}"; shift || true
-PROMETHEUS_HOST="${1:-}"; shift || true
-LOKI_HOST="${1:-}"; shift || true
-API_HOST="${1:-}"; shift || true
-
-### ===================
-### Default Values
-### ===================
-NAMESPACE="onboard"
-
-DEFAULT_OS_USERNAME="default-user"
-DEFAULT_OS_PASSWORD="default-password"
-
-OS_USERNAME="${OS_USERNAME:-$DEFAULT_OS_USERNAME}"
-OS_PASSWORD="${OS_PASSWORD:-$DEFAULT_OS_PASSWORD}"
-
-
-### ===================
-### API_HOST from environment or fallback
-### ===================
-API_HOST="${API_HOST:-}"
-API_PATH="/api/v2.0/status/update/"
-API_URL=""
-if [[ -n "$API_HOST" ]]; then
-  if [[ "$API_HOST" =~ ^https?:// ]]; then
-    API_URL="${API_HOST%/}${API_PATH}"
-  else
-    API_URL="https://${API_HOST%/}${API_PATH}"
-  fi
-fi
-
-### ===================
-### Export
-### ===================
-export CLUSTER_NAME USERNAME PROMETHEUS_HOST LOKI_HOST OS_HOST
-export API_HOST API_URL
-export NAMESPACE OS_USERNAME OS_PASSWORD
-
-### ===================
-### Confirmation Output
-### ===================
-echo "===== VARIABLES CONFIRMED ====="
-echo "CLUSTER_NAME    = $CLUSTER_NAME"
-echo "USERNAME        = $USERNAME"
-echo "OS_USERNAME     = $OS_USERNAME"
-echo "OS_PASSWORD     = $OS_PASSWORD"
-echo "PROMETHEUS_HOST = $PROMETHEUS_HOST"
-echo "LOKI_HOST       = $LOKI_HOST"
-echo "API_HOST        = $API_HOST"
-echo "API_URL         = $API_URL"
-echo "NAMESPACE       = $NAMESPACE"
-echo "================================"
-
-
+STATUS_MSG="Tool Installation Started"
 PAYLOAD="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${STATUS_MSG}\"}"
 
 if [[ -z "${API_URL:-}" ]]; then
-  log_warn "API_URL not set — skipping status update: ${STATUS_MSG}"
+  echo "[WARN] API_URL not set — skipping status update: ${STATUS_MSG}"
 else
-  log_info "Sending status to API: ${PAYLOAD}"
+  echo "[INFO] Sending status to API: ${PAYLOAD}"
   curl -k --silent --show-error --fail \
        -H "Content-Type: application/json" \
        -d "${PAYLOAD}" \
        "${API_URL}" \
-    || log_warn "API call failed for status: ${STATUS_MSG}"
+    || echo "[WARN] API call failed for status: ${STATUS_MSG}"
 fi
-STATUS_MSG="Tool Installtion Started"
