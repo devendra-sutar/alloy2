@@ -1,3 +1,7 @@
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo update 
-helm upgrade --install my-release grafana/k8s-monitoring --version 1.5.1 -n "$NAMESPACE" --create-namespace --skip-crds --set opencost.enabled=false --set cluster.name="$CLUSTER_NAME" --set externalServices.prometheus.host="$PROMETHEUS_HOST" --set externalServices.prometheus.writeEndpoint=/api/v1/write --set externalServices.loki.host="$LOKI_HOST"
+helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
+helm repo add opencost https://opencost.github.io/opencost-helm-chart
+helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"
+helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"
+kubectl patch deployment opencost -n "$NAMESPACE" --type='json'  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]'
+kubectl -n onboard set env deployment/opencost CUSTOM_PRICING_ENABLED=true 
+kubectl -n onboard set env deployment/opencost CLOUD_COST_ENABLED=true
