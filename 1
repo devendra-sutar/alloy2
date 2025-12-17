@@ -1,7 +1,11 @@
-if ! retry_helm helm upgrade --install event-exporter  oci://registry-1.docker.io/bitnamicharts/kubernetes-event-exporter -n "$NAMESPACE" -f "/tmp/values.yml" --set im>
+if ! retry_helm helm upgrade --install event-exporter \
+      oci://registry-1.docker.io/bitnamicharts/kubernetes-event-exporter \
+      --version 0.1.2 \
+      -n "$NAMESPACE" \
+      -f "/tmp/values.yml" \
+      --set image.repository=bitnamilegacy/kubernetes-event-exporter; then
   STATUS_MSG="Installation Failed"
   echo "[ERROR] event-exporter install failed after retries"
   exit 1
   # send_status here if you want
 fi
-
