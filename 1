@@ -1,1 +1,1 @@
-if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then kubectl create namespace "$NAMESPACE"; fi
+--set image.repository=bitnamilegacy/kubernetes-event-exporter
