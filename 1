@@ -1,41 +1,64 @@
-### ================================
-### Patch existing Prometheus CRDs so Helm can adopt them
-### ================================
-echo "[INFO] Patching existing Prometheus CRDs with Helm ownership metadata"
-CRD_LIST=(
-  servicemonitors.monitoring.coreos.com
-  prometheuses.monitoring.coreos.com
-  alertmanagers.monitoring.coreos.com
-  prometheusrules.monitoring.coreos.com
-  podmonitors.monitoring.coreos.com
-  probes.monitoring.coreos.com
-  thanosrulers.monitoring.coreos.com
-  alertmanagerconfigs.monitoring.coreos.com
-  prometheusagents.monitoring.coreos.com
-  scrapeconfigs.monitoring.coreos.com
-)
-
-for crd in "${CRD_LIST[@]}"; do
-  if kubectl get crd "$crd" >/dev/null 2>&1; then
-    kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
-    kubectl annotate crd "$crd" meta.helm.sh/release-name="my-release" --overwrite
-    kubectl annotate crd "$crd" meta.helm.sh/release-namespace="$NAMESPACE" --overwrite
-    echo "[INFO] Patched CRD: $crd"
-  fi
-done
-# Patch CRDs
-… (patching block above) …
-
-# Then retry install
-if ! retry_helm helm upgrade --install my-release grafana/k8s-monitoring \
-       --version 1.5.1 -n "$NAMESPACE" --create-namespace \
-       --skip-crds \
-       --set opencost.enabled=false \
-       --set cluster.name="$CLUSTER_NAME" \
-       --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
-       --set externalServices.prometheus.writeEndpoint=/api/v1/write \
-       --set externalServices.loki.host="$LOKI_HOST"; then
-  STATUS_MSG="Installation Failed"
-  echo "[ERROR] k8s-monitoring install failed after retries"
-  exit 1
-fi
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: onboarding-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onboarding-sa-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: onboarding-sa
+    namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: onboarding-config
+  namespace: default
+data:
+  CLUSTER_NAME: "Core-infra"
+  USERNAME: "admin"
+  PROMETHEUS_URL: "http://10.0.32.103:9090"
+  LOKI_URL: "http://10.0.32.103:3100"
+  API_HOST: 10.0.32.106:8006     // for to get api status tools installation started and all
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8s-onboarding-job
+  namespace: default
+  labels:
+    app: onboarding
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: onboarding
+    spec:
+      serviceAccountName: onboarding-sa
+      restartPolicy: Never
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: deploy
+          image: devendra750/monitoringstack_image:v4
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: onboarding-config
+          args:
+            - "$(CLUSTER_NAME)"
+            - "$(USERNAME)"
+            - "$(PROMETHEUS_URL)"
+            - "$(LOKI_URL)"
+            - "$(API_HOST)"
