@@ -1,49 +1,19 @@
-### ================================
-### Ensure Prometheus CRDs Exist
-### ================================
-CRD_LIST=(
-  servicemonitors.monitoring.coreos.com
-  prometheuses.monitoring.coreos.com
-  alertmanagers.monitoring.coreos.com
-  prometheusrules.monitoring.coreos.com
-  podmonitors.monitoring.coreos.com
-  probes.monitoring.coreos.com
-  thanosrulers.monitoring.coreos.com
-  alertmanagerconfigs.monitoring.coreos.com
-  prometheusagents.monitoring.coreos.com
-  scrapeconfigs.monitoring.coreos.com
-)
-
-echo "[INFO] Checking required Prometheus CRDs..."
-missing_crd=false
-for crd in "${CRD_LIST[@]}"; do
-  if ! kubectl get crd "$crd" >/dev/null 2>&1; then
-    echo "[WARN] CRD missing: $crd"
-    missing_crd=true
-  fi
-done
-
-if $missing_crd; then
-  echo "[WARN] Some Prometheus CRDs are missing. You may need to install them manually before monitoring stack installation."
-else
-  echo "[INFO] All required CRDs appear to be present."
-fi
-
-### ================================
-### Install/Upgrade Monitoring Stack (skip CRDs)
-### ================================
-if ! retry_helm helm upgrade --install my-release grafana/k8s-monitoring \
-       --version 1.5.1 \
-       -n "$NAMESPACE" --create-namespace \
-       --skip-crds \
-       --set opencost.enabled=false \
-       --set cluster.name="$CLUSTER_NAME" \
-       --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
-       --set externalServices.prometheus.writeEndpoint=/api/v1/write \
-       --set externalServices.loki.host="$LOKI_HOST"; then
-  STATUS_MSG="Installation Failed"
-  echo "[ERROR] k8s-monitoring install failed after retries"
-  # Optional: send_status here
-else
-  echo "[INFO] k8s-monitoring successfully installed (CRDs skipped)."
-fi
+Release "my-release" does not exist. Installing it now.
+Error: unable to continue with install: CustomResourceDefinition "alertmanagerconfigs.monitoring.coreos.com" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; label validation error: missing key "app.kubernetes.io/managed-by": must be set to "Helm"; annotation validation error: missing key "meta.helm.sh/release-name": must be set to "my-release"; annotation validation error: missing key "meta.helm.sh/release-namespace": must be set to "onboard"
+[WARN] Helm attempt 1 failed.
+[INFO] Attempt 2: helm upgrade --install my-release grafana/k8s-monitoring --version 1.5.1 -n onboard --create-namespace --skip-crds --set opencost.enabled=false --set cluster.name=mycluster --set externalServices.prometheus.host=http://172.16.1.107:30090 --set externalServices.prometheus.writeEndpoint=/api/v1/write --set externalServices.loki.host=http://172.16.1.107:30091
+Release "my-release" does not exist. Installing it now.
+Error: unable to continue with install: CustomResourceDefinition "alertmanagerconfigs.monitoring.coreos.com" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; label validation error: missing key "app.kubernetes.io/managed-by": must be set to "Helm"; annotation validation error: missing key "meta.helm.sh/release-name": must be set to "my-release"; annotation validation error: missing key "meta.helm.sh/release-namespace": must be set to "onboard"
+[WARN] Helm attempt 2 failed.
+[INFO] Attempt 3: helm upgrade --install my-release grafana/k8s-monitoring --version 1.5.1 -n onboard --create-namespace --skip-crds --set opencost.enabled=false --set cluster.name=mycluster --set externalServices.prometheus.host=http://172.16.1.107:30090 --set externalServices.prometheus.writeEndpoint=/api/v1/write --set externalServices.loki.host=http://172.16.1.107:30091
+Release "my-release" does not exist. Installing it now.
+Error: unable to continue with install: CustomResourceDefinition "alertmanagerconfigs.monitoring.coreos.com" in namespace "" exists and cannot be imported into the current release: invalid ownership metadata; label validation error: missing key "app.kubernetes.io/managed-by": must be set to "Helm"; annotation validation error: missing key "meta.helm.sh/release-name": must be set to "my-release"; annotation validation error: missing key "meta.helm.sh/release-namespace": must be set to "onboard"
+[WARN] Helm attempt 3 failed.
+[ERROR] k8s-monitoring install failed after retries
+[INFO] Attempt 1: helm upgrade --install kepler kepler/kepler -n onboard
+Release "kepler" does not exist. Installing it now.
+NAME: kepler
+LAST DEPLOYED: Wed Dec 17 11:46:13 2025
+NAMESPACE: onboard
+STATUS: deployed
+REVISION: 1
