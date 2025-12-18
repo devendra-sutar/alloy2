@@ -1,19 +1,23 @@
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: debug-shell
-  namespace: default
-spec:
-  containers:
-  - name: debug
-    image: nicolaka/netshoot
-    command: [ "sleep", "3600" ]
-    # optional: if using an internal network without public internet
-    # imagePullPolicy: IfNotPresent
-  restartPolicy: Never
-EOF
-kubectl exec -it debug-shell -- /bin/bash
-nslookup grafana.github.io
-dig grafana.github.io
-curl -v https://grafana.github.io/helm-charts/index.yaml
+grafana.github.io
+;; Got recursion not available from 10.43.0.10
+;; Got recursion not available from 10.43.0.10
+;; Got recursion not available from 10.43.0.10
+Server:		10.43.0.10
+Address:	10.43.0.10#53
+
+Name:	grafana.github.io
+Address: 185.199.110.153
+Name:	grafana.github.io
+Address: 185.199.109.153
+Name:	grafana.github.io
+Address: 185.199.108.153
+Name:	grafana.github.io
+Address: 185.199.111.153
+Name:	grafana.github.io
+Address: 2606:50c0:8003::153
+Name:	grafana.github.io
+Address: 2606:50c0:8002::153
+Name:	grafana.github.io
+Address: 2606:50c0:8000::153
+Name:	grafana.github.io
+Address: 2606:50c0:8001::153
