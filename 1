@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====================
+# Global Variables
+# ====================
+declare CLUSTER_NAME USERNAME PROMETHEUS_HOST LOKI_HOST API_HOST OS_HOST
+declare NAMESPACE="onboard"
+declare OUTPUT_DIR="/tmp"
+declare SA_NAME
+declare API_URL
+
+# ====================
+# Logging Functions
+# ====================
 log_success() {
   echo "[SUCCESS] $*"
 }
@@ -9,86 +21,81 @@ log_error() {
   echo "[ERROR] $*" >&2
 }
 
+log_info() {
+  echo "[INFO] $*"
+}
+
+log_warn() {
+  echo "[WARN] $*"
+}
+
+# ====================
+# Status Reporting
+# ====================
 send_status() {
   local status_msg="$1"
   local payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${status_msg}\"}"
   
   if [[ -z "${API_URL:-}" ]]; then
-    echo "[WARN] API_URL not set — skipping status update: ${status_msg}"
+    log_warn "API_URL not set — skipping status update: ${status_msg}"
   else
-    echo "[INFO] Sending status to API: ${payload}"
+    log_info "Sending status to API: ${status_msg}"
     curl -k --silent --show-error --fail \
          -H "Content-Type: application/json" \
          -d "${payload}" \
          "${API_URL}" \
-      || echo "[WARN] API call failed for status: ${status_msg}"
+      || log_warn "API call failed for status: ${status_msg}"
   fi
 }
 
-### ===================
-### Positional args
-### ===================
-CLUSTER_NAME="${1:-}"
-USERNAME="${2:-${K8S_USERNAME:-admin-user}}"
-PROMETHEUS_HOST="${3:-}"
-LOKI_HOST="${4:-}"
-API_HOST="${5:-}"
-OS_HOST="${6:-http://localhost:9200}"
+# ====================
+# Argument Parsing
+# ====================
+parse_arguments() {
+  CLUSTER_NAME="${1:-}"
+  USERNAME="${2:-${K8S_USERNAME:-admin-user}}"
+  PROMETHEUS_HOST="${3:-}"
+  LOKI_HOST="${4:-}"
+  API_HOST="${5:-}"
+  OS_HOST="${6:-http://localhost:9200}"
+  
+  # Set defaults for optional OpenSearch credentials
+  OS_USERNAME="${OS_USERNAME:-default-user}"
+  OS_PASSWORD="${OS_PASSWORD:-default-password}"
+}
 
-### ===================
-### Default Values
-### ===================
-NAMESPACE="onboard"
-OUTPUT_DIR="/tmp"
-VALUES_TEMPLATE="values-template.yaml"
-
-OS_USERNAME="${OS_USERNAME:-default-user}"
-OS_PASSWORD="${OS_PASSWORD:-default-password}"
-
-### ===================
-### API setup
-### ===================
-API_URL=""
-if [[ -n "$API_HOST" ]]; then
-  if [[ "$API_HOST" =~ ^https?:// ]]; then
-    API_URL="${API_HOST%/}/api/v2.0/status/update/"
-  else
-    API_URL="https://${API_HOST%/}/api/v2.0/status/update/"
+setup_api_url() {
+  API_URL=""
+  if [[ -n "$API_HOST" ]]; then
+    if [[ "$API_HOST" =~ ^https?:// ]]; then
+      API_URL="${API_HOST%/}/api/v2.0/status/update/"
+    else
+      API_URL="https://${API_HOST%/}/api/v2.0/status/update/"
+    fi
   fi
-fi
+}
 
-### ===================
-### Display variables
-### ===================
-echo "===== VARIABLES CONFIRMED ====="
-echo "CLUSTER_NAME    = $CLUSTER_NAME"
-echo "USERNAME        = $USERNAME"
-echo "OS_USERNAME     = $OS_USERNAME"
-echo "OS_PASSWORD     = $OS_PASSWORD"
-echo "OS_HOST         = $OS_HOST"
-echo "PROMETHEUS_HOST = $PROMETHEUS_HOST"
-echo "LOKI_HOST       = $LOKI_HOST"
-echo "API_HOST        = $API_HOST"
-echo "API_URL         = $API_URL"
-echo "NAMESPACE       = $NAMESPACE"
-echo "OUTPUT_DIR      = $OUTPUT_DIR"
-echo "VALUES_TEMPLATE = $VALUES_TEMPLATE"
-echo "================================"
+# ====================
+# Service Account Setup
+# ====================
+sanitize_sa_name() {
+  SA_NAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/^-*//;s/-*$//')
+  
+  if ! [[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; then
+    log_error "Invalid SA name: '$SA_NAME'"
+    send_status "Installation Failed - Invalid Service Account Name"
+    exit 1
+  fi
+  
+  log_info "Service Account name: $SA_NAME"
+}
 
-# Send initial status
-send_status "Tool Installation Started"
-
-### Sanitize SA name
-SA_NAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/^-*//;s/-*$//')
-if ! [[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; then
-  log_error "Invalid SA name: '$SA_NAME'"
-  send_status "Installation Failed"
-  exit 1
-fi
-
-### Create namespace and ServiceAccount
-kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
-kubectl apply -f - <<EOF
+create_service_account() {
+  log_info "Creating ServiceAccount and ClusterRoleBinding..."
+  
+  kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
+  
+  kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -108,13 +115,24 @@ subjects:
   name: ${SA_NAME}
   namespace: ${NAMESPACE}
 EOF
-log_success "ServiceAccount + ClusterRoleBinding created"
-send_status "Service Account Created"
+  
+  log_success "ServiceAccount + ClusterRoleBinding created"
+}
 
-# Skip the OpenSearch template creation if OS_HOST is default
-if [[ "$OS_HOST" != "http://localhost:9200" ]]; then
-  echo "Creating OpenSearch template..."
-  cat > "${OUTPUT_DIR}/${VALUES_TEMPLATE}" <<'EOF'
+# ====================
+# OpenSearch Template
+# ====================
+create_opensearch_template() {
+  if [[ "$OS_HOST" == "http://localhost:9200" ]]; then
+    log_info "Skipping OpenSearch template creation (default OS_HOST)"
+    return 0
+  fi
+  
+  log_info "Creating OpenSearch template..."
+  
+  local values_template="${OUTPUT_DIR}/values-template.yaml"
+  
+  cat > "$values_template" <<'EOF'
 config:
   logLevel: error
   logFormat: json
@@ -153,44 +171,103 @@ config:
             host: "{{ .Source.Host }}"
             labels: "{{ toJson .InvolvedObject.Labels}}"
 EOF
-  echo "Template written to ${OUTPUT_DIR}/${VALUES_TEMPLATE}"
-else
-  echo "Skipping OpenSearch template creation (default OS_HOST)"
-fi
+  
+  # Render template with environment variables
+  export OS_USERNAME OS_PASSWORD OS_HOST
+  envsubst < "$values_template" > "${OUTPUT_DIR}/values.yml"
+  
+  if [[ ! -s "${OUTPUT_DIR}/values.yml" ]]; then
+    log_error "Rendered values.yml is empty!"
+    return 1
+  fi
+  
+  log_success "OpenSearch template created"
+}
 
-send_status "Installation In Progress"
+# ====================
+# Helm Setup
+# ====================
+setup_helm_repos() {
+  log_info "Setting up Helm repositories..."
+  
+  helm repo add grafana https://grafana.github.io/helm-charts
+  helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
+  helm repo add opencost https://opencost.github.io/opencost-helm-chart
+  helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
+  helm repo update
+  
+  log_success "Helm repositories configured"
+}
 
-### Helm installations
-echo "Adding helm repos..."
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
-helm repo add opencost https://opencost.github.io/opencost-helm-chart
-helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
-helm repo update
+# ====================
+# K8s Monitoring Installation
+# ====================
+install_k8s_monitoring() {
+  log_info "Installing k8s-monitoring..."
+  
+  helm upgrade --install my-release grafana/k8s-monitoring \
+    --version 1.5.1 \
+    -n "$NAMESPACE" \
+    --create-namespace \
+    --skip-crds \
+    --set opencost.enabled=false \
+    --set cluster.name="$SA_NAME" \
+    --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
+    --set externalServices.prometheus.writeEndpoint=/api/v1/write \
+    --set externalServices.loki.host="$LOKI_HOST" \
+    --wait \
+    --timeout 5m
+  
+  log_success "k8s-monitoring installed"
+}
 
-echo "Installing k8s-monitoring..."
-helm upgrade --install my-release grafana/k8s-monitoring \
-  --version 1.5.1 \
-  -n "$NAMESPACE" \
-  --create-namespace \
-  --skip-crds \
-  --set opencost.enabled=false \
-  --set cluster.name="$SA_NAME" \
-  --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
-  --set externalServices.prometheus.writeEndpoint=/api/v1/write \
-  --set externalServices.loki.host="$LOKI_HOST"
+# ====================
+# Kepler Installation
+# ====================
+install_kepler() {
+  log_info "Installing Kepler..."
+  
+  helm upgrade --install kepler kepler/kepler \
+    -n "$NAMESPACE" \
+    --wait \
+    --timeout 5m
+  
+  log_success "Kepler installed"
+}
 
-echo "Installing kepler..."
-helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"
+# ====================
+# OpenCost Installation
+# ====================
+install_opencost() {
+  log_info "Installing OpenCost..."
+  
+  helm upgrade --install opencost opencost/opencost \
+    -n "$NAMESPACE" \
+    --wait \
+    --timeout 5m
+  
+  # Configure OpenCost
+  kubectl patch deployment opencost -n "$NAMESPACE" --type='json' \
+    -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[
+      {"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},
+      {"name":"INSECURE_SKIP_VERIFY","value":"true"}
+    ]}]'
+  
+  kubectl -n "$NAMESPACE" set env deployment/opencost \
+    CUSTOM_PRICING_ENABLED=true \
+    CLOUD_COST_ENABLED=true
+  
+  log_success "OpenCost installed and configured"
+}
 
-echo "Installing opencost..."
-helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"
-kubectl patch deployment opencost -n "$NAMESPACE" --type='json' -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]'
-kubectl -n "$NAMESPACE" set env deployment/opencost CUSTOM_PRICING_ENABLED=true
-kubectl -n "$NAMESPACE" set env deployment/opencost CLOUD_COST_ENABLED=true
-
-echo "Installing alloy..."
-cat > "${OUTPUT_DIR}/config.alloy" <<EOF
+# ====================
+# Alloy Installation
+# ====================
+install_alloy() {
+  log_info "Installing Alloy..."
+  
+  # Create Alloy config
+  cat > "${OUTPUT_DIR}/config.alloy" <<EOF
 prometheus.scrape "opencost" {
   targets = [{"__address__" = "opencost.${NAMESPACE}.svc.cluster.local:9003"}]
   scrape_interval = "1m"
@@ -219,21 +296,39 @@ prometheus.remote_write "central" {
   external_labels = { cluster = "${CLUSTER_NAME}", username = "${SA_NAME}" }
 }
 EOF
-
-kubectl create configmap alloy-config --namespace "$NAMESPACE" --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" --dry-run=client -o yaml | kubectl apply -f -
-
-cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
+  
+  # Create ConfigMap
+  kubectl create configmap alloy-config \
+    --namespace "$NAMESPACE" \
+    --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  
+  # Create values file
+  cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
 alloy:
   configMap:
     create: false
     name: alloy-config
     key: config.alloy
 EOF
+  
+  # Install Alloy
+  helm upgrade --install alloy grafana/alloy \
+    -n "$NAMESPACE" \
+    -f "${OUTPUT_DIR}/values-alloy.yaml" \
+    --wait \
+    --timeout 5m
+  
+  log_success "Alloy installed"
+}
 
-helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"
-
-echo "Installing trivy-operator..."
-cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
+# ====================
+# Trivy Operator Installation
+# ====================
+install_trivy_operator() {
+  log_info "Installing Trivy Operator..."
+  
+  cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
 operator:
   metricsVulnIdEnabled: true
 serviceMonitor:
@@ -243,12 +338,191 @@ trivy:
 service:
   headless: false
 EOF
+  
+  helm upgrade --install trivy-operator aquasecurity/trivy-operator \
+    -n "$NAMESPACE" \
+    -f "${OUTPUT_DIR}/trivy-values.yaml" \
+    --wait \
+    --timeout 5m
+  
+  log_success "Trivy Operator installed"
+}
 
-helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"
+# ====================
+# Metrics Server Installation
+# ====================
+install_metrics_server() {
+  log_info "Installing Metrics Server..."
+  
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  
+  kubectl patch deployment metrics-server -n kube-system --type='json' \
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+  
+  log_success "Metrics Server installed"
+}
 
-echo "Installing metrics-server..."
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+# ====================
+# Display Configuration
+# ====================
+display_configuration() {
+  echo "===== ONBOARDING CONFIGURATION ====="
+  echo "Cluster Name:      $CLUSTER_NAME"
+  echo "Username:          $USERNAME"
+  echo "Service Account:   $SA_NAME"
+  echo "Namespace:         $NAMESPACE"
+  echo "Prometheus Host:   $PROMETHEUS_HOST"
+  echo "Loki Host:         $LOKI_HOST"
+  echo "API Host:          $API_HOST"
+  echo "API URL:           ${API_URL:-Not configured}"
+  echo "OpenSearch Host:   $OS_HOST"
+  echo "===================================="
+  echo ""
+}
 
-send_status "Cluster Onboarded Successfully"
-echo "Onboarding completed successfully!"
+# ====================
+# Validation
+# ====================
+validate_requirements() {
+  log_info "Validating requirements..."
+  
+  # Check for required commands
+  local required_commands=("kubectl" "helm" "envsubst")
+  for cmd in "${required_commands[@]}"; do
+    if ! command -v "$cmd" &> /dev/null; then
+      log_error "Required command '$cmd' not found"
+      exit 1
+    fi
+  done
+  
+  # Check Kubernetes connectivity
+  if ! kubectl cluster-info &> /dev/null; then
+    log_error "Cannot connect to Kubernetes cluster"
+    exit 1
+  fi
+  
+  # Validate required arguments
+  if [[ -z "$CLUSTER_NAME" ]] || [[ -z "$PROMETHEUS_HOST" ]] || [[ -z "$LOKI_HOST" ]]; then
+    log_error "Missing required arguments"
+    echo "Usage: $0 <cluster_name> <username> <prometheus_host> <loki_host> <api_host> [os_host]"
+    exit 1
+  fi
+  
+  log_success "All requirements validated"
+}
+
+# ====================
+# Main Execution Flow
+# ====================
+main() {
+  log_info "Starting cluster onboarding process..."
+  
+  # Parse arguments
+  parse_arguments "$@"
+  
+  # Setup API URL
+  setup_api_url
+  
+  # Display configuration
+  display_configuration
+  
+  # Send initial status
+  send_status "Tool Installation Started"
+  
+  # Validate requirements
+  validate_requirements
+  
+  # Setup Service Account
+  sanitize_sa_name
+  create_service_account
+  send_status "Service Account Created"
+  
+  # Create OpenSearch template (if needed)
+  create_opensearch_template || log_warn "OpenSearch template creation skipped or failed"
+  
+  # Update status
+  send_status "Installation In Progress"
+  
+  # Setup Helm
+  setup_helm_repos
+  
+  # Install components
+  install_k8s_monitoring
+  install_kepler
+  install_opencost
+  install_alloy
+  install_trivy_operator
+  install_metrics_server
+  
+  # Final status
+  send_status "Cluster Onboarded Successfully"
+  
+  log_success "Cluster onboarding completed successfully!"
+  log_info "Components installed in namespace: $NAMESPACE"
+  log_info "Service Account: $SA_NAME"
+  log_info "Monitoring configured for Prometheus: $PROMETHEUS_HOST"
+  log_info "Logging configured for Loki: $LOKI_HOST"
+  
+  echo ""
+  echo "=============================================="
+  echo "ONBOARDING SUMMARY"
+  echo "=============================================="
+  echo "✓ Service Account: $SA_NAME"
+  echo "✓ Grafana k8s-monitoring"
+  echo "✓ Kepler (Energy monitoring)"
+  echo "✓ OpenCost (Cost monitoring)"
+  echo "✓ Alloy (Metrics forwarding)"
+  echo "✓ Trivy Operator (Security scanning)"
+  echo "✓ Metrics Server"
+  echo "=============================================="
+}
+
+# ====================
+# Error Handling
+# ====================
+handle_error() {
+  local exit_code=$?
+  local line_number=$1
+  local command=$2
+  
+  log_error "Script failed at line $line_number: $command"
+  log_error "Exit code: $exit_code"
+  
+  # Send failure status if API is configured
+  if [[ -n "${API_URL:-}" ]] && [[ -n "${CLUSTER_NAME:-}" ]]; then
+    local payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"Installation Failed\"}"
+    curl -k --silent \
+         -H "Content-Type: application/json" \
+         -d "$payload" \
+         "${API_URL}" \
+      || true
+  fi
+  
+  exit $exit_code
+}
+
+# Set error trap
+trap 'handle_error ${LINENO} "$BASH_COMMAND"' ERR
+
+# ====================
+# Script Entry Point
+# ====================
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # Check if minimum arguments are provided
+  if [[ $# -lt 5 ]]; then
+    echo "Usage: $0 <cluster_name> <username> <prometheus_host> <loki_host> <api_host> [os_host]"
+    echo ""
+    echo "Example:"
+    echo "  $0 \\"
+    echo "    \"my-cluster\" \\"
+    echo "    \"admin\" \\"
+    echo "    \"http://prometheus:9090\" \\"
+    echo "    \"http://loki:3100\" \\"
+    echo "    \"api.example.com:8006\" \\"
+    echo "    \"http://opensearch:9200\""
+    echo ""
+    exit 1
+  fi
+  
+  main "$@"
+fi
