@@ -1,34 +1,280 @@
-FROM ubuntu:20.04
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Set non-interactive frontend
-ENV DEBIAN_FRONTEND=noninteractive
+log_success() {
+  echo "[SUCCESS] $*"
+}
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    sudo \
-    gettext-base \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+log_error() {
+  echo "[ERROR] $*" >&2
+}
 
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/ \
-    && kubectl version --client
+send_status() {
+  local status_msg="$1"
+  local payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${status_msg}\"}"
+  
+  if [[ -z "${API_URL:-}" ]]; then
+    echo "[WARN] API_URL not set — skipping status update: ${status_msg}"
+  else
+    echo "[INFO] Sending status to API: ${payload}"
+    curl -k --silent --show-error --fail \
+         -H "Content-Type: application/json" \
+         -d "${payload}" \
+         "${API_URL}" \
+      || echo "[WARN] API call failed for status: ${status_msg}"
+  fi
+}
 
-# Install Helm using direct download (no DNS dependency)
-RUN HELM_VERSION="v3.17.0" \
-    && curl -LO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-    && tar -zxvf "helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-    && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf "helm-${HELM_VERSION}-linux-amd64.tar.gz" linux-amd64 \
-    && helm version
+### ===================
+### Positional args
+### ===================
+CLUSTER_NAME="${1:-}"
+USERNAME="${2:-${K8S_USERNAME:-admin-user}}"
+PROMETHEUS_HOST="${3:-}"
+LOKI_HOST="${4:-}"
+API_HOST="${5:-}"
+OS_HOST="${6:-http://localhost:9200}"
 
-# Copy the deployment script
-COPY deploy.sh /usr/local/bin/deploy.sh
-RUN chmod +x /usr/local/bin/deploy.sh
+### ===================
+### Default Values
+### ===================
+NAMESPACE="onboard"
+OUTPUT_DIR="/tmp"
+VALUES_TEMPLATE="values-template.yaml"
 
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/deploy.sh"]
+OS_USERNAME="${OS_USERNAME:-default-user}"
+OS_PASSWORD="${OS_PASSWORD:-default-password}"
+
+### ===================
+### API setup
+### ===================
+API_URL=""
+if [[ -n "$API_HOST" ]]; then
+  if [[ "$API_HOST" =~ ^https?:// ]]; then
+    API_URL="${API_HOST%/}/api/v2.0/status/update/"
+  else
+    API_URL="https://${API_HOST%/}/api/v2.0/status/update/"
+  fi
+fi
+
+### ===================
+### Display variables
+### ===================
+echo "===== VARIABLES CONFIRMED ====="
+echo "CLUSTER_NAME    = $CLUSTER_NAME"
+echo "USERNAME        = $USERNAME"
+echo "OS_USERNAME     = $OS_USERNAME"
+echo "OS_PASSWORD     = $OS_PASSWORD"
+echo "OS_HOST         = $OS_HOST"
+echo "PROMETHEUS_HOST = $PROMETHEUS_HOST"
+echo "LOKI_HOST       = $LOKI_HOST"
+echo "API_HOST        = $API_HOST"
+echo "API_URL         = $API_URL"
+echo "NAMESPACE       = $NAMESPACE"
+echo "OUTPUT_DIR      = $OUTPUT_DIR"
+echo "VALUES_TEMPLATE = $VALUES_TEMPLATE"
+echo "================================"
+
+# Send initial status
+send_status "Tool Installation Started"
+
+### Sanitize SA name
+SA_NAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/^-*//;s/-*$//')
+if ! [[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]]; then
+  log_error "Invalid SA name: '$SA_NAME'"
+  send_status "Installation Failed"
+  exit 1
+fi
+
+### Create namespace and ServiceAccount
+kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${SA_NAME}-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+EOF
+log_success "ServiceAccount + ClusterRoleBinding created"
+send_status "Service Account Created"
+
+# Skip the OpenSearch template creation if OS_HOST is default
+if [[ "$OS_HOST" != "http://localhost:9200" ]]; then
+  echo "Creating OpenSearch template..."
+  cat > "${OUTPUT_DIR}/${VALUES_TEMPLATE}" <<'EOF'
+config:
+  logLevel: error
+  logFormat: json
+  route:
+    routes:
+      - match:
+        - receiver: "dump"
+        drop:
+        - namespace: "event-exporter"
+        - type: "Normal"
+  receivers:
+    - name: "dump"
+      opensearch:
+        hosts:
+          - "${OS_HOST}"
+        index: "kube-events"
+        indexFormat: "kube-events"
+        username: "${OS_USERNAME}"
+        password: "${OS_PASSWORD}"
+        useEventID: true
+        deDot: true
+        tls:
+          insecureSkipVerify: true
+        layout:
+          eventType: "kubernetes-event"
+          createdAt: "{{ .GetTimestampMs }}"
+          details:
+            message: "{{ .Message }}"
+            reason: "{{ .Reason }}"
+            type: "{{ .Type }}"
+            count: "{{ .Count }}"
+            kind: "{{ .InvolvedObject.Kind }}"
+            name: "{{ .InvolvedObject.Name }}"
+            namespace: "{{ .Namespace }}"
+            component: "{{ .Source.Component }}"
+            host: "{{ .Source.Host }}"
+            labels: "{{ toJson .InvolvedObject.Labels}}"
+EOF
+  echo "Template written to ${OUTPUT_DIR}/${VALUES_TEMPLATE}"
+else
+  echo "Skipping OpenSearch template creation (default OS_HOST)"
+fi
+
+send_status "Installation In Progress"
+
+### Helm installations
+echo "Adding helm repos..."
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
+helm repo add opencost https://opencost.github.io/opencost-helm-chart
+helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
+helm repo update
+
+echo "Installing k8s-monitoring..."
+helm upgrade --install my-release grafana/k8s-monitoring \
+  --version 1.5.1 \
+  -n "$NAMESPACE" \
+  --create-namespace \
+  --skip-crds \
+  --set opencost.enabled=false \
+  --set cluster.name="$SA_NAME" \
+  --set externalServices.prometheus.host="$PROMETHEUS_HOST" \
+  --set externalServices.prometheus.writeEndpoint=/api/v1/write \
+  --set externalServices.loki.host="$LOKI_HOST"
+
+echo "Installing kepler..."
+helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"
+
+echo "Installing opencost..."
+helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"
+kubectl patch deployment opencost -n "$NAMESPACE" --type='json' -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]'
+kubectl -n "$NAMESPACE" set env deployment/opencost CUSTOM_PRICING_ENABLED=true
+kubectl -n "$NAMESPACE" set env deployment/opencost CLOUD_COST_ENABLED=true
+
+echo "Installing alloy..."
+cat > "${OUTPUT_DIR}/config.alloy" <<EOF
+prometheus.scrape "opencost" {
+  targets = [{"__address__" = "opencost.${NAMESPACE}.svc.cluster.local:9003"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "kepler" {
+  targets = [{"__address__" = "kepler.${NAMESPACE}.svc.cluster.local:9102"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "trivy_operator" {
+  targets = [{"__address__" = "trivy-operator.${NAMESPACE}.svc.cluster.local:80"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.remote_write "central" {
+  endpoint {
+    url = "${PROMETHEUS_HOST}/api/v1/write"
+    tls_config {
+      insecure_skip_verify = true
+    }
+  }
+  external_labels = { cluster = "${CLUSTER_NAME}", username = "${SA_NAME}" }
+}
+EOF
+
+kubectl create configmap alloy-config --namespace "$NAMESPACE" --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" --dry-run=client -o yaml | kubectl apply -f -
+
+cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
+alloy:
+  configMap:
+    create: false
+    name: alloy-config
+    key: config.alloy
+EOF
+
+helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"
+
+echo "Installing trivy-operator..."
+cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
+operator:
+  metricsVulnIdEnabled: true
+serviceMonitor:
+  enabled: true
+trivy:
+  ignoreUnfixed: true
+service:
+  headless: false
+EOF
+
+helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"
+
+echo "Installing metrics-server..."
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+
+send_status "Cluster Onboarded Successfully"
+echo "Onboarding completed successfully!"
+
+ kubectl logs k8s-onboarding-job-jgfvs --follow
+===== VARIABLES CONFIRMED =====
+CLUSTER_NAME    = Core-infra
+USERNAME        = admin
+OS_USERNAME     = default-user
+OS_PASSWORD     = default-password
+OS_HOST         = http://localhost:9200
+PROMETHEUS_HOST = http://172.16.1.107:30090
+LOKI_HOST       = http://10.0.32.103:3100
+API_HOST        = 172.16.1.188:8006
+API_URL         = https://172.16.1.188:8006/api/v2.0/status/update/
+NAMESPACE       = onboard
+OUTPUT_DIR      = /tmp
+VALUES_TEMPLATE = values-template.yaml
+================================
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Tool Installation Started","storage":"redis","processing_time_ms":1.3}namespace/onboard created
+serviceaccount/admin created
+clusterrolebinding.rbac.authorization.k8s.io/admin-cluster-admin unchanged
+[SUCCESS] ServiceAccount + ClusterRoleBinding created
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Service Account Created"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Service Account Created","storage":"redis","processing_time_ms":0.93}Skipping OpenSearch template creation (default OS_HOST)
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Installation In Progress"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Installation In Progress","storage":"redis","processing_time_ms":0.71}Adding helm repos...
+error: unexpected EOF
