@@ -1,4 +1,32 @@
-cat deploy.sh 
+kubectl logs k8s-onboarding-job-v6xpt --follow
+===== VARIABLES CONFIRMED =====
+CLUSTER_NAME    = Core-infra
+USERNAME        = admin
+OS_USERNAME     = default-user
+OS_PASSWORD     = default-password
+PROMETHEUS_HOST = http://172.16.1.107:30090
+LOKI_HOST       = http://10.0.32.103:3100
+API_HOST        = 172.16.1.188:8006
+API_URL         = https://172.16.1.188:8006/api/v2.0/status/update/
+NAMESPACE       = onboard
+OUTPUT_DIR      = /tmp
+VALUES_TEMPLATE = values-template.yaml
+================================
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Tool Installation Started","storage":"redis","processing_time_ms":0.84}serviceaccount/admin unchanged
+clusterrolebinding.rbac.authorization.k8s.io/admin-cluster-admin unchanged
+[SUCCESS] ServiceAccount + ClusterRoleBinding created
+Creating values template...
+Template written to /tmp/values-template.yaml
+Rendering values.yml...
+Created /tmp/values.yml
+Rendering event-exporter.yaml...
+Created /tmp/event-exporter.yaml
+Done rendering templates.
+error: unexpected EOF
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 log_success() {
@@ -187,9 +215,9 @@ echo "Done rendering templates."
 
 if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then kubectl create namespace "$NAMESPACE"; fi
 
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-helm install event-exporter bitnami/kubernetes-event-exporter  -n "$NAMESPACE" -f "/tmp/values.yml"  
+###helm repo add bitnami https://charts.bitnami.com/bitnami
+###helm repo update
+###helm install event-exporter bitnami/kubernetes-event-exporter  -n "$NAMESPACE" -f "/tmp/values.yml"  
 #--set image.repository=bitnamilegacy/kubernetes-event-exporter
 
 STATUS_MSG="Installation In Progress..."
@@ -280,5 +308,3 @@ helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE
  kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
 STATUS_MSG="Cluster Onboarded Succesfully"
-root@devendra-ws:/home/ubuntu/git-monitoring-img# 
-
