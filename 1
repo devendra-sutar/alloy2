@@ -1,23 +1,26 @@
-grafana.github.io
-;; Got recursion not available from 10.43.0.10
-;; Got recursion not available from 10.43.0.10
-;; Got recursion not available from 10.43.0.10
-Server:		10.43.0.10
-Address:	10.43.0.10#53
+dig grafana.github.io
 
-Name:	grafana.github.io
-Address: 185.199.110.153
-Name:	grafana.github.io
-Address: 185.199.109.153
-Name:	grafana.github.io
-Address: 185.199.108.153
-Name:	grafana.github.io
-Address: 185.199.111.153
-Name:	grafana.github.io
-Address: 2606:50c0:8003::153
-Name:	grafana.github.io
-Address: 2606:50c0:8002::153
-Name:	grafana.github.io
-Address: 2606:50c0:8000::153
-Name:	grafana.github.io
-Address: 2606:50c0:8001::153
+; <<>> DiG 9.20.10 <<>> grafana.github.io
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 15218
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 1232
+; COOKIE: 5388f76e9f293a22 (echoed)
+;; QUESTION SECTION:
+;grafana.github.io.		IN	A
+
+;; ANSWER SECTION:
+grafana.github.io.	8	IN	A	185.199.110.153
+grafana.github.io.	8	IN	A	185.199.109.153
+grafana.github.io.	8	IN	A	185.199.108.153
+grafana.github.io.	8	IN	A	185.199.111.153
+
+;; Query time: 1 msec
+;; SERVER: 10.43.0.10#53(10.43.0.10) (UDP)
+;; WHEN: Thu Dec 18 07:37:19 UTC 2025
+;; MSG SIZE  rcvd: 190
+
+debug-shell:~# 
