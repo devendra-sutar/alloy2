@@ -1,9 +1,1 @@
-iptables -t nat -L POSTROUTING -n -v
-Chain POSTROUTING (policy ACCEPT 9197K packets, 588M bytes)
- pkts bytes target     prot opt in     out     source               destination         
-9268K  591M cali-POSTROUTING  0    --  *      *       0.0.0.0/0            0.0.0.0/0            /* cali:O3lYWMrLQYEMJtB5 */
-9243K  589M KUBE-POSTROUTING  0    --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes postrouting rules */
-  351 21278 MASQUERADE  0    --  *      !docker0  172.17.0.0/16        0.0.0.0/0           
-root@devendra-ws:/home/ubuntu/git-monitoring-img# 
-
-
+sudo iptables -t nat -A POSTROUTING -s 10.42.0.0/16 ! -d 10.42.0.0/16 -j MASQUERADE
