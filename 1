@@ -1,11 +1,269 @@
-if ! retry_helm helm upgrade --install event-exporter \
-      oci://registry-1.docker.io/bitnamicharts/kubernetes-event-exporter \
-      --version 0.1.2 \
-      -n "$NAMESPACE" \
-      -f "/tmp/values.yml" \
-      --set image.repository=bitnamilegacy/kubernetes-event-exporter; then
-  STATUS_MSG="Installation Failed"
-  echo "[ERROR] event-exporter install failed after retries"
-  exit 1
-  # send_status here if you want
+kubectl logs k8s-onboarding-job-5w26p  --follow
+===== VARIABLES CONFIRMED =====
+CLUSTER_NAME    = Core-infra
+USERNAME        = admin
+OS_USERNAME     = default-user
+OS_PASSWORD     = default-password
+PROMETHEUS_HOST = http://172.16.1.107:30090
+LOKI_HOST       = http://10.0.32.103:3100
+API_HOST        = 172.16.1.188:8006
+API_URL         = https://172.16.1.188:8006/api/v2.0/status/update/
+NAMESPACE       = onboard
+OUTPUT_DIR      = /tmp
+VALUES_TEMPLATE = values-template.yaml
+================================
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Tool Installation Started","storage":"redis","processing_time_ms":1.44}Creating values template...
+Template written to /tmp/values-template.yaml
+Rendering values.yml...
+Created /tmp/values.yml
+Rendering event-exporter.yaml...
+Created /tmp/event-exporter.yaml
+Done rendering templates.
+error: unexpected EOF
+root@devendra-ws:/home/ubuntu/git-monitoring-img# cat deploy.sh 
+#!/usr/bin/env bash
+set -euo pipefail
+
+### ===================
+### Positional args
+### ===================
+CLUSTER_NAME="${1:-}"; shift || true
+USERNAME="${1:-${K8S_USERNAME:-admin-user}}"; shift || true
+PROMETHEUS_HOST="${1:-}"; shift || true
+LOKI_HOST="${1:-}"; shift || true
+API_HOST="${1:-}"; shift || true
+
+### ===================
+### Default Values
+### ===================
+NAMESPACE="onboard"
+
+DEFAULT_OS_USERNAME="default-user"
+DEFAULT_OS_PASSWORD="default-password"
+
+OS_USERNAME="${OS_USERNAME:-$DEFAULT_OS_USERNAME}"
+OS_PASSWORD="${OS_PASSWORD:-$DEFAULT_OS_PASSWORD}"
+OUTPUT_DIR="/tmp"
+VALUES_TEMPLATE="values-template.yaml"
+
+
+### ===================
+### API_HOST from environment or fallback
+### ===================
+API_HOST="${API_HOST:-}"
+API_PATH="/api/v2.0/status/update/"
+API_URL=""
+if [[ -n "$API_HOST" ]]; then
+  if [[ "$API_HOST" =~ ^https?:// ]]; then
+    API_URL="${API_HOST%/}${API_PATH}"
+  else
+    API_URL="https://${API_HOST%/}${API_PATH}"
+  fi
 fi
+
+### ===================
+### Export
+### ===================
+export CLUSTER_NAME USERNAME PROMETHEUS_HOST LOKI_HOST OS_HOST
+export API_HOST API_URL
+export NAMESPACE OS_USERNAME OS_PASSWORD
+
+### ===================
+### Confirmation Output
+### ===================
+echo "===== VARIABLES CONFIRMED ====="
+echo "CLUSTER_NAME    = $CLUSTER_NAME"
+echo "USERNAME        = $USERNAME"
+echo "OS_USERNAME     = $OS_USERNAME"
+echo "OS_PASSWORD     = $OS_PASSWORD"
+echo "PROMETHEUS_HOST = $PROMETHEUS_HOST"
+echo "LOKI_HOST       = $LOKI_HOST"
+echo "API_HOST        = $API_HOST"
+echo "API_URL         = $API_URL"
+echo "NAMESPACE       = $NAMESPACE"
+echo "OUTPUT_DIR      = $OUTPUT_DIR"
+echo "VALUES_TEMPLATE = $VALUES_TEMPLATE"
+
+echo "================================"
+
+
+STATUS_MSG="Tool Installation Started"
+PAYLOAD="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${STATUS_MSG}\"}"
+
+if [[ -z "${API_URL:-}" ]]; then
+  echo "[WARN] API_URL not set — skipping status update: ${STATUS_MSG}"
+else
+  echo "[INFO] Sending status to API: ${PAYLOAD}"
+  curl -k --silent --show-error --fail \
+       -H "Content-Type: application/json" \
+       -d "${PAYLOAD}" \
+       "${API_URL}" \
+    || echo "[WARN] API call failed for status: ${STATUS_MSG}"
+fi
+
+
+STATUS_MSG="Tool Installtion Started"
+
+
+# Create values template
+echo "Creating values template..."
+cat > "${OUTPUT_DIR}/${VALUES_TEMPLATE}" <<'EOF'
+config:
+  logLevel: error
+  logFormat: json
+  route:
+    routes:
+      - match:
+        - receiver: "dump"
+        drop:
+        - namespace: "event-exporter"
+        - type: "Normal"
+  receivers:
+    - name: "dump"
+      opensearch:
+        hosts:
+          - "${OS_HOST}"
+        index: "kube-events"
+        indexFormat: "kube-events"
+        username: "${OS_USERNAME}"
+        password: "${OS_PASSWORD}"
+        useEventID: true
+        deDot: true
+        tls:
+          insecureSkipVerify: true
+        layout:
+          eventType: "kubernetes-event"
+          createdAt: "{{ .GetTimestampMs }}"
+          details:
+            message: "{{ .Message }}"
+            reason: "{{ .Reason }}"
+            type: "{{ .Type }}"
+            count: "{{ .Count }}"
+            kind: "{{ .InvolvedObject.Kind }}"
+            name: "{{ .InvolvedObject.Name }}"
+            namespace: "{{ .Namespace }}"
+            component: "{{ .Source.Component }}"
+            host: "{{ .Source.Host }}"
+            labels: "{{ toJson .InvolvedObject.Labels}}"
+EOF
+
+echo "Template written to ${OUTPUT_DIR}/${VALUES_TEMPLATE}"
+
+# Render values.yml
+echo "Rendering values.yml..."
+export OS_USERNAME OS_PASSWORD OS_HOST CLUSTER_NAME SA_NAME
+envsubst < "${OUTPUT_DIR}/${VALUES_TEMPLATE}" > "${OUTPUT_DIR}/values.yml"
+if [[ ! -s "${OUTPUT_DIR}/values.yml" ]]; then
+  echo "[ERROR] Rendered values.yml is empty!" >&2
+  exit 1
+fi
+echo "Created ${OUTPUT_DIR}/values.yml"
+
+# Render event-exporter.yaml
+echo "Rendering event-exporter.yaml..."
+envsubst < "${OUTPUT_DIR}/${VALUES_TEMPLATE}" > "${OUTPUT_DIR}/event-exporter.yaml"
+if [[ ! -s "${OUTPUT_DIR}/event-exporter.yaml" ]]; then
+  echo "[ERROR] Rendered event-exporter.yaml is empty!" >&2
+  exit 1
+fi
+echo "Created ${OUTPUT_DIR}/event-exporter.yaml"
+
+echo "Done rendering templates."
+
+if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then kubectl create namespace "$NAMESPACE"; fi
+
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+helm install event-exporter bitnami/kubernetes-event-exporter -n "$NAMESPACE" -f "/tmp/values.yml"  --set image.repository=bitnamilegacy/kubernetes-event-exporter
+
+STATUS_MSG="Installation In Progress..."
+
+
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update 
+helm upgrade --install my-release grafana/k8s-monitoring --version 1.5.1 -n "$NAMESPACE" --create-namespace --skip-crds --set opencost.enabled=false --set cluster.name="$CLUSTER_NAME" --set externalServices.prometheus.host="$PROMETHEUS_HOST" --set externalServices.prometheus.writeEndpoint=/api/v1/write --set externalServices.loki.host="$LOKI_HOST"
+
+
+
+helm repo add kepler https://sustainable-computing-io.github.io/kepler-helm-chart
+helm repo add opencost https://opencost.github.io/opencost-helm-chart
+helm upgrade --install kepler kepler/kepler -n "$NAMESPACE"
+helm upgrade --install opencost opencost/opencost -n "$NAMESPACE"
+kubectl patch deployment opencost -n "$NAMESPACE" --type='json'  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":[{"name":"PROMETHEUS_SERVER_ENDPOINT","value":"'"$PROMETHEUS_HOST"'"},{"name":"INSECURE_SKIP_VERIFY","value":"true"}]}]'
+kubectl -n onboard set env deployment/opencost CUSTOM_PRICING_ENABLED=true 
+kubectl -n onboard set env deployment/opencost CLOUD_COST_ENABLED=true
+
+
+### ================================
+### Create config.alloy for Alloy
+### ================================
+cat > "${OUTPUT_DIR}/config.alloy" <<EOF
+prometheus.scrape "opencost" {
+  targets = [{"__address__" = "opencost.${NAMESPACE}.svc.cluster.local:9003"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "kepler" {
+  targets = [{"__address__" = "kepler.${NAMESPACE}.svc.cluster.local:9102"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.scrape "trivy_operator" {
+  targets = [{"__address__" = "trivy-operator.${NAMESPACE}.svc.cluster.local:80"}]
+  scrape_interval = "1m"
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.central.receiver]
+}
+prometheus.remote_write "central" {
+  endpoint {
+    url = "${PROMETHEUS_HOST}/api/v1/write"
+    tls_config {
+      insecure_skip_verify = true
+    }
+  }
+  external_labels = { cluster = "${CLUSTER_NAME}", username = "${USERNAME}" }
+}
+EOF
+
+echo "Created ${OUTPUT_DIR}/config.alloy"
+kubectl create configmap alloy-config --namespace "$NAMESPACE" --from-file=config.alloy="${OUTPUT_DIR}/config.alloy" --dry-run=client -o yaml | kubectl apply -f -
+cat > "${OUTPUT_DIR}/values-alloy.yaml" <<EOF
+alloy:
+  configMap:
+    create: false
+    name: alloy-config
+    key: config.alloy
+EOF
+
+echo "Created ${OUTPUT_DIR}/values-alloy.yaml"
+helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"
+
+
+
+helm repo add aquasecurity https://aquasecurity.github.io/helm-charts
+helm repo update
+cat > "${OUTPUT_DIR}/trivy-values.yaml" <<EOF
+operator:
+  metricsVulnIdEnabled: true
+serviceMonitor:
+  enabled: true
+trivy:
+  ignoreUnfixed: true
+service:
+  headless: false
+EOF
+
+echo "Created ${OUTPUT_DIR}/trivy-values.yaml"
+helm upgrade --install trivy-operator aquasecurity/trivy-operator -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"
+
+
+
+ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+ kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+
+STATUS_MSG="Cluster Onboarded Succesfully"
+root@devendra-ws:/home/ubuntu/git-monitoring-img# 
+
