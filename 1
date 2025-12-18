@@ -1,3 +1,32 @@
+devendra@rdp:~> kubectl logs k8s-onboarding-job-42w2z  --follow
+===== VARIABLES CONFIRMED =====
+CLUSTER_NAME    = Core-infra
+USERNAME        = admin
+OS_USERNAME     = default-user
+OS_PASSWORD     = default-password
+OS_HOST         = http://localhost:9200
+PROMETHEUS_HOST = http://172.16.1.107:30090
+LOKI_HOST       = http://10.0.32.103:3100
+API_HOST        = 172.16.1.188:8006
+API_URL         = https://172.16.1.188:8006/api/v2.0/status/update/
+NAMESPACE       = onboard
+OUTPUT_DIR      = /tmp
+VALUES_TEMPLATE = values-template.yaml
+================================
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Tool Installation Started","storage":"redis","processing_time_ms":1.63}serviceaccount/admin unchanged
+clusterrolebinding.rbac.authorization.k8s.io/admin-cluster-admin unchanged
+[SUCCESS] ServiceAccount + ClusterRoleBinding created
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Service Account Created"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Service Account Created","storage":"redis","processing_time_ms":0.68}Skipping OpenSearch template creation (default OS_HOST)
+[INFO] Sending status to API: {"cluster_name":"Core-infra","status":"Installation In Progress"}
+{"message":"status updated","cluster_name":"Core-infra","status":"Installation In Progress","storage":"redis","processing_time_ms":0.61}Adding helm repos...
+"grafana" has been added to your repositories
+error: unexpected EOF
+
+
+giving me unexpected EOF while i converted this shell script in images as job 
+
 #!/usr/bin/env bash
 set -euo pipefail
 
