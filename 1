@@ -1,1 +1,26 @@
-d
+ kubectl logs k8s-onboarding-job-wdrhb --follow
+[INFO]  FULL API ENDPOINT: https://172.16.1.188:8006/api/v2.0/status/update/
+[INFO]  Checking /tmp writability...
+[SUCCESS] /tmp is writable
+[SUCCESS] KUBECONFIG accessible
+[INFO]  Sending status to API: {"cluster_name":"devops","status":"Tool Installation Started"}
+{"message":"status updated","cluster_name":"devops","status":"Tool Installation Started","storage":"redis","processing_time_ms":0.8}[INFO]  Checking required tools: kubectl, helm, envsubst, curl, awk
+[SUCCESS] Tools ready
+[#####---------------------------------------------]  10%serviceaccount/admin created
+clusterrolebinding.rbac.authorization.k8s.io/admin-cluster-admin unchanged
+[SUCCESS] ServiceAccount + ClusterRoleBinding created
+[##########----------------------------------------]  20%[SUCCESS] No conflicting namespaces
+[###############-----------------------------------]  30%[INFO]  Creating values template...
+[SUCCESS] Values template created
+[####################------------------------------]  40%[INFO]  Sending status to API: {"cluster_name":"devops","status":"Installation In Progress..."}
+{"message":"status updated","cluster_name":"devops","status":"Installation In Progress...","storage":"redis","processing_time_ms":0.81}[INFO]  Rendering values template...
+[SUCCESS] Values rendered
+[#########################-------------------------]  50%[INFO]  Deploying Kubernetes Event Exporter...
+Error: looks like "https://charts.bitnami.com/bitnami" is not a valid chart repository or cannot be reached: Get "https://charts.bitnami.com/bitnami/index.yaml": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+[WARN] Retry 1/3 in 2s...
+
+
+
+
+
+
