@@ -1,43 +1,46 @@
- kubectl run network-test --image=curlimages/curl:latest --restart=Never --rm -it -- \
->   sh -c '
->   echo "=== Testing connectivity to Helm repos ==="
->   for url in \
->     "https://charts.bitnami.com/bitnami" \
->     "https://grafana.github.io/helm-charts" \
->     "https://sustainable-computing-io.github.io/kepler-helm-chart" \
->     "https://opencost.github.io/opencost-helm-chart" \
->     "https://aquasecurity.github.io/helm-charts"; do
->     echo -n "Testing $url ... "
->     if curl -s --connect-timeout 5 --max-time 10 "$url" > /dev/null; then
->       echo "✓ OK"
->     else
->       echo "✗ FAILED"
->     fi
->   done
->   echo "=== DNS Test ==="
->   nslookup charts.bitnami.com
->   '
-All commands and output from this session will be recorded in container logs, including credentials and sensitive information passed through the command prompt.
-If you don't see a command prompt, try pressing enter.
-✓ OK
-Testing https://sustainable-computing-io.github.io/kepler-helm-chart ... ✓ OK
-Testing https://opencost.github.io/opencost-helm-chart ... ✓ OK
-Testing https://aquasecurity.github.io/helm-charts ... ✓ OK
-=== DNS Test ===
-Server:		10.43.0.10
-Address:	10.43.0.10:53
+FROM ubuntu:20.04
 
-charts.bitnami.com	canonical name = dqk9m89za31r9.cloudfront.net
+# Set non-interactive frontend and timezone
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
 
-charts.bitnami.com	canonical name = dqk9m89za31r9.cloudfront.net
-Name:	dqk9m89za31r9.cloudfront.net
-Address: 143.204.55.28
-Name:	dqk9m89za31r9.cloudfront.net
-Address: 143.204.55.21
-Name:	dqk9m89za31r9.cloudfront.net
-Address: 143.204.55.31
-Name:	dqk9m89za31r9.cloudfront.net
-Address: 143.204.55.72
+# Install dependencies with certificates
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    sudo \
+    gettext-base \
+    wget \
+    gnupg \
+    ca-certificates \
+    apt-transport-https \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
 
-pod "network-test" deleted from default namespace
-devendra@rdp:~> kubectl get ns
+# Install kubectl (latest stable)
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/ \
+    && kubectl version --client
+
+# Install Helm from package manager (more reliable)
+RUN curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list \
+    && apt-get update \
+    && apt-get install -y helm \
+    && helm version
+
+# Pre-add common Helm repos (optional but helps)
+RUN helm repo add grafana https://grafana.github.io/helm-charts \
+    && helm repo add prometheus-community https://prometheus-community.github.io/helm-charts \
+    && helm repo update
+
+# Copy deployment script
+COPY deploy.sh /usr/local/bin/deploy.sh
+RUN chmod +x /usr/local/bin/deploy.sh
+
+# Set working directory
+WORKDIR /workspace
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/deploy.sh"]
