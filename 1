@@ -1,8 +1,27 @@
-sysctl -w net.ip4.ip_forward=1
-sysctl: cannot stat /proc/sys/net/ip4/ip_forward: No such file or directory
-root@devendra-ws:/home/ubuntu/git-monitoring-img# sysctl -w net.ip4.ip_forward
-sysctl: command line(0): invalid syntax, continuing...
-root@devendra-ws:/home/ubuntu/git-monitoring-img# sysctl net.ip4.ip_forward
-sysctl: cannot stat /proc/sys/net/ip4/ip_forward: No such file or directory
-root@devendra-ws:/home/ubuntu/git-monitoring-img# 
-
+kubectl get ippool -o yaml
+apiVersion: v1
+items:
+- apiVersion: crd.projectcalico.org/v1
+  kind: IPPool
+  metadata:
+    creationTimestamp: "2025-12-13T09:04:08Z"
+    generation: 1
+    labels:
+      app.kubernetes.io/managed-by: tigera-operator
+    name: default-ipv4-ippool
+    resourceVersion: "1060"
+    uid: 8401f74f-c835-4540-84db-3825d8f40e7b
+  spec:
+    allowedUses:
+    - Workload
+    - Tunnel
+    assignmentMode: Automatic
+    blockSize: 26
+    cidr: 10.42.0.0/16
+    ipipMode: Never
+    natOutgoing: true
+    nodeSelector: all()
+    vxlanMode: Always
+kind: List
+metadata:
+  resourceVersion: ""
