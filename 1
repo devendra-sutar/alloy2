@@ -1,2 +1,19 @@
-[#########################-------------------------]  50%[INFO]  Deploying Kubernetes Event Exporter...
-Error: looks like "https://charts.bitnami.com/bitnami" is not a valid chart repository or cannot be reached: Get "https://repo.broadcom.com/bitnami-files/index.yaml": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+kubectl run network-test --image=curlimages/curl:latest --restart=Never --rm -it -- \
+  sh -c '
+  echo "=== Testing connectivity to Helm repos ==="
+  for url in \
+    "https://charts.bitnami.com/bitnami" \
+    "https://grafana.github.io/helm-charts" \
+    "https://sustainable-computing-io.github.io/kepler-helm-chart" \
+    "https://opencost.github.io/opencost-helm-chart" \
+    "https://aquasecurity.github.io/helm-charts"; do
+    echo -n "Testing $url ... "
+    if curl -s --connect-timeout 5 --max-time 10 "$url" > /dev/null; then
+      echo "✓ OK"
+    else
+      echo "✗ FAILED"
+    fi
+  done
+  echo "=== DNS Test ==="
+  nslookup charts.bitnami.com
+  '
