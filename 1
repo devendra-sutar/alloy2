@@ -1,27 +1,19 @@
-FROM ubuntu:20.04
-
-# Set non-interactive frontend for apt
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install dependencies + CA certificates
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    sudo \
-    gettext-base \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/
-
-# Install Helm
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-# Copy the deployment script
-COPY deploy.sh /usr/local/bin/deploy.sh
-RUN chmod +x /usr/local/bin/deploy.sh
-
-ENTRYPOINT ["/usr/local/bin/deploy.sh"]
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-shell
+  namespace: default
+spec:
+  containers:
+  - name: debug
+    image: nicolaka/netshoot
+    command: [ "sleep", "3600" ]
+    # optional: if using an internal network without public internet
+    # imagePullPolicy: IfNotPresent
+  restartPolicy: Never
+EOF
+kubectl exec -it debug-shell -- /bin/bash
+nslookup grafana.github.io
+dig grafana.github.io
+curl -v https://grafana.github.io/helm-charts/index.yaml
