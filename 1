@@ -1,27 +1,9 @@
-kubectl get ippool -o yaml
-apiVersion: v1
-items:
-- apiVersion: crd.projectcalico.org/v1
-  kind: IPPool
-  metadata:
-    creationTimestamp: "2025-12-13T09:04:08Z"
-    generation: 1
-    labels:
-      app.kubernetes.io/managed-by: tigera-operator
-    name: default-ipv4-ippool
-    resourceVersion: "1060"
-    uid: 8401f74f-c835-4540-84db-3825d8f40e7b
-  spec:
-    allowedUses:
-    - Workload
-    - Tunnel
-    assignmentMode: Automatic
-    blockSize: 26
-    cidr: 10.42.0.0/16
-    ipipMode: Never
-    natOutgoing: true
-    nodeSelector: all()
-    vxlanMode: Always
-kind: List
-metadata:
-  resourceVersion: ""
+iptables -t nat -L POSTROUTING -n -v
+Chain POSTROUTING (policy ACCEPT 9197K packets, 588M bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+9268K  591M cali-POSTROUTING  0    --  *      *       0.0.0.0/0            0.0.0.0/0            /* cali:O3lYWMrLQYEMJtB5 */
+9243K  589M KUBE-POSTROUTING  0    --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes postrouting rules */
+  351 21278 MASQUERADE  0    --  *      !docker0  172.17.0.0/16        0.0.0.0/0           
+root@devendra-ws:/home/ubuntu/git-monitoring-img# 
+
+
