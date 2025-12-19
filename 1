@@ -1,27 +1,6 @@
-FROM ubuntu:20.04
-
-# Set non-interactive frontend for apt
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    sudo \
-    gettext-base \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/
-
-# Install Helm
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-# Copy the deployment script
-COPY deploy.sh /usr/local/bin/deploy.sh
-RUN chmod +x /usr/local/bin/deploy.sh
-
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/deploy.sh"]
+[#########################-------------------------]  50%[INFO]  Deploying Kubernetes Event Exporter...
+Error: looks like "https://charts.bitnami.com/bitnami" is not a valid chart repository or cannot be reached: Get "https://repo.broadcom.com/bitnami-files/index.yaml": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+[WARN] Retry 1/3 in 2s...
+Error: looks like "https://charts.bitnami.com/bitnami" is not a valid chart repository or cannot be reached: Get "https://repo.broadcom.com/bitnami-files/index.yaml": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+[WARN] Retry 2/3 in 4s...
+getting error ,  i created my own chart so can i add .tgz or any other formate of file so it can fetch from that my chart not a offcical repo?
