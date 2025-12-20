@@ -1,4 +1,38 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: onboard
+FROM ubuntu:20.04
+
+# Set non-interactive frontend for apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+# 'gettext-base' is required for the 'envsubst' command in your script
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    gettext-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# --- CRITICAL FIXES START HERE ---
+
+# 1. Set the working directory
+# This ensures that when the script says "./charts", it looks in /app/charts
+WORKDIR /app
+
+# 2. Copy the required directories
+# These commands copy your local folders into the Docker image
+COPY charts /app/charts
+COPY manifests /app/manifests
+
+# 3. Copy the deployment script into the working directory
+COPY deploy.sh /app/deploy.sh
+RUN chmod +x /app/deploy.sh
+
+# 4. Run the script
+ENTRYPOINT ["/app/deploy.sh"]
