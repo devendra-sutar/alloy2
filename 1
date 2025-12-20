@@ -45,34 +45,41 @@ show_progress(){
 send_status(){
   local status_msg="$1"
   local payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${status_msg}\"}"
+  
   if [[ -z "${API_URL:-}" ]]; then
     log_warn "API_URL not set — skipping status update: ${status_msg}"
     return 0
   fi
+  
   log_info "Sending status to API: ${status_msg}"
   
-  local retries=3
-  local wait_sec=2
+  local retries=2       # Reduced retries to avoid long waits
+  local wait_sec=1
   local attempt=1
+  local max_time=5      # Max 5 seconds per request
   
   while [[ $attempt -le $retries ]]; do
-    http_code=$(curl -k --silent --write-out "%{http_code}" \
+    # Added -m (max-time) to prevent hanging if API is not responding
+    # Added || echo "000" to catch curl connection errors without exiting script
+    http_code=$(curl -k -m "$max_time" --silent --write-out "%{http_code}" \
       --output /tmp/api_resp.json \
       -H "Content-Type: application/json" \
       -d "${payload}" \
-      "${API_URL}")
+      "${API_URL}" || echo "000")
     
     if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
       log_success "Status sent: ${status_msg}"
       return 0
     fi
-    log_warn "API response HTTP=${http_code} (attempt ${attempt}/${retries})"
+    
+    log_warn "API unavailable (HTTP=${http_code}). Attempt ${attempt}/${retries}..."
     (( attempt++ ))
     sleep $(( wait_sec * attempt ))
   done
   
-  log_error "Final failure sending status: ${status_msg}"
-  return 1
+  # --- CHANGED HERE: Log warning and RETURN 0 so script continues ---
+  log_warn "Failed to send status '${status_msg}' after retries. Skipping API update and proceeding..."
+  return 0
 }
 
 ### ===== Utilities =====
@@ -97,6 +104,7 @@ retry_cmd(){
 INSTALLATION_SUCCEEDED=false
 cleanup_on_failure() {
   if [[ "$INSTALLATION_SUCCEEDED" == "false" ]]; then
+    # We still try to send the failed status, but if that fails too, we just exit
     send_status "Tools Installation Failed..."
   fi
 }
