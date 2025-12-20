@@ -1,247 +1,27 @@
-#!/usr/bin/env bash
-# Offline Onboarding Script - Uses bundled parent Helm chart only
-set -euo pipefail
+FROM ubuntu:20.04
 
-### ===== Configuration Variables =====
-NAMESPACE="onboard"
-OUTPUT_DIR="/tmp"
-PARENT_CHART_DIR="."                  # Current directory contains the parent chart
-PARENT_CHART_NAME="onboarding-offline" # Name from your Chart.yaml
-VALUES_FILE="${OUTPUT_DIR}/onboarding-values.yaml"
+# Set non-interactive frontend for apt
+ENV DEBIAN_FRONTEND=noninteractive
 
-DEFAULT_OS_USERNAME="default-user"
-DEFAULT_OS_PASSWORD="default-password"
-DEFAULT_OS_HOST="https://10.0.33.244:9200"
-DEFAULT_PROMETHEUS_HOST="http://10.0.2.13:9090"
-DEFAULT_LOKI_HOST="http://10.0.2.13:3100"
-DEFAULT_API_HOST="10.0.32.106:8006"
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    sudo \
+    gettext-base \
+    && rm -rf /var/lib/apt/lists/*
 
-### ===== Colors & Logging =====
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/
 
-### ===== Progress Bar =====
-TOTAL_STEPS=8
-CURRENT_STEP=0
-show_progress() {
-  local percent=$(( CURRENT_STEP * 100 / TOTAL_STEPS ))
-  local bar_width=50
-  local filled=$(( percent * bar_width / 100 ))
-  local empty=$(( bar_width - filled ))
-  printf "\r["
-  printf "%0.s#" $(seq 1 $filled)
-  printf "%0.s-" $(seq 1 $empty)
-  printf "] %3d%%" "$percent"
-  if [ "$CURRENT_STEP" -eq "$TOTAL_STEPS" ]; then echo; fi
-}
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-### ===== Send Status =====
-send_status() {
-  local status_msg="$1"
-  local payload="{\"cluster_name\":\"${CLUSTER_NAME}\",\"status\":\"${status_msg}\"}"
-  if [[ -z "${API_URL:-}" ]]; then
-    log_warn "API_URL not set — skipping status update"
-    return 0
-  fi
-  log_info "Sending status: ${status_msg}"
-  curl -sk -X POST -H "Content-Type: application/json" -d "${payload}" "${API_URL}" >/dev/null || true
-}
+# Copy the deployment script
+COPY deploy.sh /usr/local/bin/deploy.sh
+RUN chmod +x /usr/local/bin/deploy.sh
 
-### ===== Retry =====
-retry_cmd() {
-  local attempts=${1:-3}; shift
-  local sleep_sec=${1:-2}; shift
-  local i=0
-  until "$@"; do
-    ((i++)) || true
-    if [ $i -ge $attempts ]; then
-      log_error "Failed after $attempts attempts: $*"
-      return 1
-    fi
-    local backoff=$(( sleep_sec * (2 ** (i - 1)) ))
-    log_warn "Retry $i/$attempts in ${backoff}s..."
-    sleep "$backoff"
-  done
-}
-
-### ===== Trap Failure =====
-INSTALLATION_SUCCEEDED=false
-trap 'if [[ "$INSTALLATION_SUCCEEDED" == "false" ]]; then send_status "Tools Installation Failed..."; fi' EXIT
-
-### ===== Usage =====
-show_usage() {
-  cat <<EOF
-Usage: $0 <CLUSTER_NAME> [USERNAME] [PROMETHEUS_URL] [LOKI_URL] [API_HOST] [OPTIONS]
-
-Options:
-  --os-username USER --os-password PASS --os-host URL
-  -n/--namespace NS
-  --dry-run
-EOF
-  exit 1
-}
-
-### ===== Parse Args =====
-CLUSTER_NAME="${1:-}"; shift || true
-USERNAME="${1:-admin-user}"; shift || true
-PROMETHEUS_HOST="${1:-$DEFAULT_PROMETHEUS_HOST}"; shift || true
-LOKI_HOST="${1:-$DEFAULT_LOKI_HOST}"; shift || true
-API_HOST="${1:-$DEFAULT_API_HOST}"; shift || true
-
-DRY_RUN=false
-OS_USERNAME="$DEFAULT_OS_USERNAME"
-OS_PASSWORD="$DEFAULT_OS_PASSWORD"
-OS_HOST="$DEFAULT_OS_HOST"
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --os-username) OS_USERNAME="$2"; shift 2;;
-    --os-password) OS_PASSWORD="$2"; shift 2;;
-    --os-host) OS_HOST="$2"; shift 2;;
-    -n|--namespace) NAMESPACE="$2"; shift 2;;
-    --dry-run) DRY_RUN=true; shift;;
-    -h|--help) show_usage;;
-    *) log_error "Unknown argument: $1"; show_usage;;
-  esac
-done
-
-[[ -z "$CLUSTER_NAME" ]] && { log_error "CLUSTER_NAME required"; exit 1; }
-
-### ===== API URL =====
-API_PATH="/api/v2.0/tools/installation/started"
-if [[ -n "$API_HOST" ]]; then
-  if [[ "$API_HOST" =~ ^https?:// ]]; then
-    API_URL="${API_HOST%/}${API_PATH}"
-  else
-    API_URL="https://${API_HOST}${API_PATH}"
-  fi
-fi
-
-### ===== SA Name =====
-SA_NAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g')
-[[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || { log_error "Invalid SA name"; exit 1; }
-
-send_status "Tools Installation Started..."
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Step 1: Tools Check
-for tool in kubectl helm envsubst; do
-  command -v "$tool" >/dev/null || { log_error "Missing $tool"; exit 1; }
-done
-log_success "Required tools present"
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Step 2: ServiceAccount & ClusterRoleBinding
-retry_cmd 3 2 kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${SA_NAME}
-  namespace: ${NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ${SA_NAME}-cluster-admin
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: ${SA_NAME}
-  namespace: ${NAMESPACE}
-EOF
-log_success "ServiceAccount created"
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Step 3: Generate Custom Values File
-log_info "Generating values file for parent chart..."
-cat > "$VALUES_FILE" <<EOF
-global:
-  cluster:
-    name: ${CLUSTER_NAME}
-
-# External remote write/read endpoints
-externalServices:
-  prometheus:
-    host: ${PROMETHEUS_HOST}
-    writeEndpoint: /api/v1/write
-    externalLabels:
-      username: ${SA_NAME}
-  loki:
-    host: ${LOKI_HOST}
-
-# Event Exporter OpenSearch config
-eventExporter:
-  config:
-    receivers:
-      - name: "dump"
-        opensearch:
-          hosts:
-            - "${OS_HOST}"
-          username: "${OS_USERNAME}"
-          password: "${OS_PASSWORD}"
-          tls:
-            insecureSkipVerify: true
-
-# Enable/disable components as needed
-grafana:
-  enabled: true
-
-opencost:
-  enabled: true
-
-kepler:
-  enabled: true
-
-trivy-operator:
-  enabled: true
-  trivy:
-    ignoreUnfixed: true
-  serviceMonitor:
-    enabled: true
-
-alloy:
-  enabled: true
-  # Add custom Alloy config here if needed
-EOF
-
-log_success "Values file generated: $VALUES_FILE"
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Step 4: Dry-run or Install Parent Chart
-if [[ "$DRY_RUN" == "true" ]]; then
-  log_info "DRY-RUN: helm upgrade --install --dry-run"
-  helm upgrade --install onboarding-release "$PARENT_CHART_DIR" \
-    --namespace "$NAMESPACE" --create-namespace \
-    --values "$VALUES_FILE" \
-    --dry-run
-else
-  log_info "Installing parent chart: $PARENT_CHART_NAME"
-  retry_cmd 3 2 helm upgrade --install onboarding-release "$PARENT_CHART_DIR" \
-    --namespace "$NAMESPACE" --create-namespace \
-    --values "$VALUES_FILE" \
-    --timeout 10m
-  log_success "All tools deployed via parent chart"
-fi
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Step 5: Metrics Server (components.yaml)
-if [[ "$DRY_RUN" != "true" ]]; then
-  log_info "Applying metrics-server components.yaml"
-  kubectl apply -f "${PARENT_CHART_DIR}/charts/components.yaml"
-  kubectl patch deployment metrics-server -n kube-system --type=json \
-    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' || true
-  log_success "Metrics Server installed"
-fi
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
-
-### Final Success
-send_status "Cluster Onboarded Successfully"
-INSTALLATION_SUCCEEDED=true
-log_success "Onboarding Completed Successfully!"
-CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/deploy.sh"]
