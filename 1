@@ -53,32 +53,20 @@ send_status(){
   
   log_info "Sending status to API: ${status_msg}"
   
-  local retries=2       # Reduced retries to avoid long waits
-  local wait_sec=1
-  local attempt=1
-  local max_time=5      # Max 5 seconds per request
-  
-  while [[ $attempt -le $retries ]]; do
-    # Added -m (max-time) to prevent hanging if API is not responding
-    # Added || echo "000" to catch curl connection errors without exiting script
-    http_code=$(curl -k -m "$max_time" --silent --write-out "%{http_code}" \
-      --output /tmp/api_resp.json \
-      -H "Content-Type: application/json" \
-      -d "${payload}" \
-      "${API_URL}" || echo "000")
+  # --- UPDATED LOGIC: Try ONCE, timeout 5s, continue if fail ---
+  http_code=$(curl -k -m 5 --silent --write-out "%{http_code}" \
+    --output /tmp/api_resp.json \
+    -H "Content-Type: application/json" \
+    -d "${payload}" \
+    "${API_URL}" || echo "000")
     
-    if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
-      log_success "Status sent: ${status_msg}"
-      return 0
-    fi
-    
-    log_warn "API unavailable (HTTP=${http_code}). Attempt ${attempt}/${retries}..."
-    (( attempt++ ))
-    sleep $(( wait_sec * attempt ))
-  done
+  if [[ "$http_code" =~ ^2[0-9]{2}$ ]]; then
+    log_success "Status sent: ${status_msg}"
+  else
+    # Log warning only, do not exit script
+    log_warn "API failed (HTTP=${http_code}). Skipping update and proceeding..."
+  fi
   
-  # --- CHANGED HERE: Log warning and RETURN 0 so script continues ---
-  log_warn "Failed to send status '${status_msg}' after retries. Skipping API update and proceeding..."
   return 0
 }
 
@@ -104,7 +92,6 @@ retry_cmd(){
 INSTALLATION_SUCCEEDED=false
 cleanup_on_failure() {
   if [[ "$INSTALLATION_SUCCEEDED" == "false" ]]; then
-    # We still try to send the failed status, but if that fails too, we just exit
     send_status "Tools Installation Failed..."
   fi
 }
@@ -197,6 +184,7 @@ if ! [[ "$SA_NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
 fi
 
 ### ===== Pre-checks =====
+# Since we are in Docker /app, we check /tmp for writability
 log_info "Checking output dir writability..."
 if touch "${OUTPUT_DIR}/test" &>/dev/null && rm -f "${OUTPUT_DIR}/test"; then
   log_success "${OUTPUT_DIR} writable"
@@ -245,7 +233,6 @@ log_success "ServiceAccount + ClusterRoleBinding created"
 CURRENT_STEP=$((CURRENT_STEP+1)); show_progress
 
 ### Step 3: Namespace conflict check
-# Excluded Kyverno, KubeArmor, NFD from check as requested
 for ns in alloy kubesage-security; do
   if kubectl get ns "$ns" >/dev/null 2>&1; then
     log_error "Namespace '$ns' exists. Cannot proceed."
@@ -328,7 +315,9 @@ deploy_event_exporter(){
     log_info "Dry-run: skipping install of event exporter"
     return 0
   fi
-  # Updated path: ./charts/kubernetes-event-exporter-3.6.3.tgz
+  
+  # PATH FIX: Dockerfile puts charts in /app/charts, script runs in /app
+  # So path is ./charts/...
   retry_cmd 3 2 helm upgrade --install kubernetes-event-exporter \
     ./charts/kubernetes-event-exporter-3.6.3.tgz \
     --create-namespace -n "$NAMESPACE" \
@@ -348,7 +337,7 @@ if [[ "$SKIP_MONITORING" != "true" ]]; then
   if [[ "$DRY_RUN" == "true" ]]; then
     log_info "Dry-run: skipping monitoring stack"
   else
-    # Updated path: ./charts/k8s-monitoring-1.5.1.tgz
+    # PATH FIX: ./charts/
     retry_cmd 3 2 helm upgrade --install "$RELEASE_NAME" ./charts/k8s-monitoring-1.5.1.tgz \
       -n "$TARGET_NS" --create-namespace \
       --set cluster.name="$CLUSTER_NAME" \
@@ -371,9 +360,8 @@ if [[ "$SKIP_COST_ANALYSIS" != "true" ]]; then
     log_info "Dry-run: skipping cost analysis"
   else
     log_info "Deploying cost analysis (Kepler, OpenCost, Alloy)..."
-    # Updated path: ./charts/kepler-0.6.1.tgz
+    # PATH FIX: ./charts/
     retry_cmd 3 2 helm upgrade --install kepler ./charts/kepler-0.6.1.tgz -n "$NAMESPACE"
-    # Updated path: ./charts/opencost-2.4.1.tgz
     retry_cmd 3 2 helm upgrade --install opencost ./charts/opencost-2.4.1.tgz -n "$NAMESPACE"
     
     retry_cmd 3 2 kubectl patch deployment opencost -n "$NAMESPACE" --type='json' \
@@ -420,7 +408,8 @@ alloy:
     name: alloy-config
     key: config.alloy
 EOF
-    # NOTE: Ensure alloy-0.1.1.tgz exists in ./charts/ if you intend to run this.
+    # PATH FIX: ./charts/
+    # Ensure alloy-0.1.1.tgz is in your /app/charts/ directory!
     retry_cmd 3 2 helm upgrade --install alloy ./charts/alloy-0.1.1.tgz -n "$NAMESPACE" -f "${OUTPUT_DIR}/values-alloy.yaml"
     log_success "Cost analysis deployed"
   fi
@@ -446,7 +435,7 @@ trivy:
 service:
   headless: false
 EOF
-    # Updated path: ./charts/trivy-operator-0.20.1.tgz
+    # PATH FIX: ./charts/
     retry_cmd 3 2 helm upgrade --install trivy-operator ./charts/trivy-operator-0.20.1.tgz \
       -n "$NAMESPACE" -f "${OUTPUT_DIR}/trivy-values.yaml"
     log_success "Trivy Operator deployed"
@@ -460,7 +449,7 @@ send_status "Cluster Onboarded Successfully"
 ### Step 10: Metrics Server
 if [[ "$DRY_RUN" != "true" ]]; then
   log_info "Deploying Metrics Server..."
-  # Updated path to ./manifests/components.yaml based on file tree
+  # PATH FIX: ./manifests/ (Since Dockerfile copies to /app/manifests)
   kubectl apply -f ./manifests/components.yaml
   
   kubectl patch deployment metrics-server -n kube-system --type='json' \
