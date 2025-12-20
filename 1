@@ -1,35 +1,32 @@
-dependencies:
-  - name: kyverno
-    version: 3.2.6
-    repository: https://kyverno.github.io/kyverno/
-    condition: kyverno.enabled
-
-
-  - name: kubearmor-operator
-    version: 1.6.4
-    repository: https://kubearmor.github.io/charts
-    condition: kubearmor.enabled
-
-  - name: node-feature-discovery
-    version: 0.18.3
-    repository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
-    condition: nfd.enabled
-
-
-
-clusterName: ""
-username: ""
-prometheusUrl: ""
-lokiUrl: ""
-backendHost: ""
-providerName: ""
-tags: []
-agentId: ""
-apiKey: ""
-
-kubearmor:
-  enabled: true
-  config:
-    enableSecurity: true
-    enableVisibility: true
-    enablePolicy: true
+{{/*
+Validate that required values are supplied via --set (or values file)
+*/}}
+{{- define "requiredValues" -}}
+  {{- if not .Values.clusterName -}}
+    {{- fail "clusterName is REQUIRED. Use --set clusterName=..." -}}
+  {{- end -}}
+  {{- if not .Values.username -}}
+    {{- fail "username is REQUIRED. Use --set username=..." -}}
+  {{- end -}}
+  {{- if not .Values.prometheusUrl -}}
+    {{- fail "prometheusUrl is REQUIRED. Use --set prometheusUrl=..." -}}
+  {{- end -}}
+  {{- if not .Values.lokiUrl -}}
+    {{- fail "lokiUrl is REQUIRED. Use --set lokiUrl=..." -}}
+  {{- end -}}
+  {{- if not .Values.backendHost -}}
+    {{- fail "backendHost is REQUIRED. Use --set backendHost=..." -}}
+  {{- end -}}
+  {{- if not .Values.providerName -}}
+    {{- fail "providerName is REQUIRED. Use --set providerName=..." -}}
+  {{- end -}}
+  {{- if not .Values.agentId -}}
+    {{- fail "agentId is REQUIRED. Use --set agentId=..." -}}
+  {{- end -}}
+  {{- if not .Values.apiKey -}}
+    {{- fail "apiKey is REQUIRED. Use --set apiKey=..." -}}
+  {{- end -}}
+  {{- if not .Values.tags -}}
+    {{- fail "tags is REQUIRED. Use --set tags='{prod,dev}'" -}}
+  {{- end -}}
+{{- end -}}
