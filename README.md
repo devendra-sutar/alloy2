@@ -795,9 +795,62 @@ EXPOSE 9000
 CMD ["./agent"]
 ```
 
-## 4. Installation
+## 4. Hosting & Installation
 
-The `onboarding-agent` Helm chart is hosted on GitHub Pages. You can install it using the following command:
+The Helm chart is designed to be hosted via GitHub Pages (acting as a Helm Repository).
+
+### 1. Repository Setup (GitHub Pages)
+
+To serve the chart, you need to commit the chart package and an `index.yaml` to a GitHub repository and enable GitHub Pages.
+
+**Directory Structure in Repo:**
+```
+.
+├── charts/
+│   └── onboarding-agent-0.1.1.tgz  # The packaged chart
+└── index.yaml                      # The repository index
+```
+
+**`index.yaml` Example:**
+```yaml
+apiVersion: v1
+entries:
+  onboarding-agent:
+  - apiVersion: v2
+    appVersion: 1.16.1
+    created: "2025-12-04T12:59:18.205324137Z"
+    dependencies:
+    - condition: kyverno.enabled
+      name: kyverno
+      repository: https://kyverno.github.io/kyverno/
+      version: 3.2.6
+    - condition: kubearmor.enabled
+      name: kubearmor-operator
+      repository: https://kubearmor.github.io/charts
+      version: 1.6.4
+    - condition: nfd.enabled
+      name: node-feature-discovery
+      repository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+      version: 0.18.3
+    description: A Helm chart for Kubernetes
+    digest: 087425a65482b669318c587a58fa07f653aeeb95c5abb6edbff8f5273183b805
+    name: onboarding-agent
+    type: application
+    urls:
+    - https://OS3Infotech.github.io/KubeSage-Public/charts/onboarding-agent-0.1.1.tgz
+    version: 0.1.1
+generated: "2025-12-04T12:59:18.170548734Z"
+```
+
+**Process:**
+1.  Package the chart: `helm package onboarding-agent/` -> creates `onboarding-agent-0.1.1.tgz`.
+2.  Generate/Update index: `helm repo index . --url https://<USER>.github.io/<REPO>/` (or manually create `index.yaml`).
+3.  Push `index.yaml` and the `.tgz` file to the GitHub repository.
+4.  Go to **GitHub Repo Settings -> Pages -> Branch**, select your branch and root directory (or `/docs`), and Save.
+
+### 2. Client Installation
+
+Once hosted, users can install the chart using standard Helm commands.
 
 ```bash
 helm repo add onboarding-chart-repo https://OS3Infotech.github.io/KubeSage-Public/ && \
