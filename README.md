@@ -1,9 +1,8 @@
 • Onboarding image :-
-We are creating an onboarding image using a shell script. The name of the onboarding image is [ os3infotech/monitoring-stack:v1.0.0 ]. This image contains the installation and configuration of the following tools: Kubernetes Event Exporter, K8s Monitoring, Kepler, OpenCost, Alloy, Trivy Operator, and metric tools for displaying CPU and memory usage in the UI dashboard. The remaining tools—Kubearmor, Kyverno, and NFD—have been added in the Chart.yaml of the onboarding chart because we included the os3infotech/monitoring-stack:v1.0.0 image in the onboarding chart.
+
+                     We are creating an onboarding image using a shell script. The name of the onboarding image is [ os3infotech/monitoring-stack:v1.0.0 ]. This image contains the installation and configuration of the following tools: Kubernetes Event Exporter, K8s Monitoring, Kepler, OpenCost, Alloy, Trivy Operator, and metric tools for displaying CPU and memory usage in the UI dashboard. The remaining tools—Kubearmor, Kyverno, and NFD—have been added in the Chart.yaml of the onboarding chart because we included the os3infotech/monitoring-stack:v1.0.0 image in the onboarding chart.
 Shell script :-
 #!/usr/bin/env bash
-
-Robust Kubernetes Deployment Script (Final Version)
 set -euo pipefail
 
 ===== Configuration Variables =====
@@ -592,31 +591,25 @@ Installation Lifecycle & Status Reporting (API Host)
 • Flow: Before critical steps or upon failure, the script constructs a JSON payload containing the cluster_name and status. It uses curl to POST this data to the API_HOST endpoint (/api/v2.0/tools/installation/started).
 • Data Path: Shell Script (Local) → HTTPS POST → Central API Host
 • Will Show This data To Kubesage UI while Onboarding Cluster.
-
 Foundation & Access Control
 • Working: The script creates a dedicated ServiceAccount and binds it to the cluster-admin role.
 • Why: This gives all the subsequent tools the necessary permissions to read cluster nodes, pods, and secrets required for monitoring.
-
 Real-Time Incident Tracking (Kubernetes Event Exporter)
 • Working: This tool listens to the Kubernetes API for “Events” (like Pod Failures, BackOffs, Node Errors).
 • Flow: It uses the API Host you provided to derive a Webhook URL (/webhook/incidents). It filters cluster events and pushes them directly to this URL via HTTP POST.
-
 • Data Path: K8s Events → Exporter → Central API Host (Webhook Endpoint)
 Energy Monitoring (Kepler)
 • Working: Kepler deploys a DaemonSet that uses eBPF to probe the Linux kernel on every node. It measures CPU instructions, cache misses, and voltage to estimate power consumption (Joules/Watts).
 • Flow: It exposes these raw energy metrics on internal port 9102.
 • Data Path: Kernel (eBPF) → Kepler Pod (:9102) → Alloy (Scrape)
-
 Cost Analysis (OpenCost)
 • Working: OpenCost watches the resources (CPU/RAM) requested by every pod and maps them to the underlying node costs.
 • Flow: It calculates the “Cost Rate” for every workload and exposes these financial metrics on internal port 9003.
 • Data Path: K8s Resource Usage → OpenCost Pod (:9003) → Alloy (Scrape)
-
 Security Scanning (Trivy Operator)
 • Working: Trivy automatically scans images for Vulnerabilities (CVEs) and configurations for security risks.
 • Flow: The script enables metricsVulnIdEnabled, forcing Trivy to translate detailed security reports into lightweight Prometheus metrics exposed on internal port 80.
 • Data Path: Image Registry → Trivy Pod (:80) → Alloy (Scrape)
-
 Central Aggregation (Grafana Alloy)
 • Working: Alloy is the central “Shipping Agent.” It is the only component that sends metric data outbound.
 • Flow:
@@ -625,18 +618,15 @@ Forward: It sends this data to your Central Prometheus via remote_write (using H
 •
 • Flow: The script explicitly enables metricsVulnIdEnabled, forcing Trivy to translate these heavy reports into lightweight Prometheus metrics exposed on internal port 80.
 • Data Path: Image Registry → Trivy Pod (:80) → Alloy (Scrape)
-
 Central Aggregation (Grafana Alloy)
 • Working: Alloy is deployed as the central “Shipping Agent.” It is the only component that talks to your central server.
 • Flow:
 Scrape: It polls Kepler (9102), OpenCost (9003), and Trivy (80) every 60 seconds to collect their data.
 Forward: It packages this data and sends it to your Central Prometheus via remote_write (using HTTPS over port 443/80).
 • Data Path: [Kepler + OpenCost + Trivy] → Alloy → Central Prometheus
-
 [ We were passing variables using the command
 bash deploy.sh “cluster name” “user name” “prom ip/url” “loki ip/url” “api host” “agent id” “api key”
 to run this shell script. However, we have now created a Docker image from this shell script and referenced it in the onboarding Helm chart. Therefore, instead of passing arguments via the shell command, we will use --set values with the helm install command. ]
-
 For eg.
 helm repo add onboarding-chart-repo https://OS3Infotech.github.io/KubeSage-Public/ &&
 helm repo update &&
@@ -652,12 +642,10 @@ helm install onboarding-release onboarding-chart-repo/onboarding-agent
 –set agentId=“851108b0-f358-4ad5-a268-897a9b882aa8”
 –set apiKey=“ks_U7YDllxRjFbdDUG16qyrdYrjyEnrG2oB”
 Like this.
-
 [ You can see in the shell script that, in the helm install commands, I have added them in this way:
 helm upgrade --install kepler ./charts/kepler-0.6.1.tgz for all tools.
 This is because we are no longer using helm repo add. We have created an offline chart bundle and included it directly inside the onboarding image.
 As a result, the Helm commands run using local paths such as ./charts/kepler, ./charts/alloy, etc., which are fetched directly from the os3infotech/monitoring-stack image:v1.0.0. because of this speed of onboarding cluster is increased cause fetching repo from internet no longer ]
-
 
 • Onboarding image creation :-
 Onboarding –image :-
@@ -1245,3 +1233,4 @@ helm install onboarding-release onboarding-chart-repo/onboarding-agent
 –set tags="{}"
 –set agentId=“851108b0-f358-4ad5-a268-897a9b882aa8”
 –set apiKey=“ks_U7YDllxRjFbdDUG16qyrdYrjyEnrG2oB”
+
